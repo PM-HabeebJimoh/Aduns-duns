@@ -1,43 +1,78 @@
-# Product Manager Skillset
+# product-manager-skillset
 
-A structured reference of the core skills a Product Manager (PM) needs across the product lifecycle. Each skill area lives in its own file with definitions, sub-skills, why they matter, and curated learning resources.
+Agent Skills for working alongside a Product Manager (PM) — following the [shadcn skill format](https://github.com/shadcn-ui/ui/tree/main/skills). Drop these into any agent that supports Agent Skills (Claude Code, Codex CLI, Cursor, Windsurf, etc.) and it will proactively help with discovery, PRDs, prioritization, metrics, and launches — using the same conventions and vocabulary a senior PM would.
 
-> Scope: **reference only** — no templates or working documents. Use this as a self-assessment map, an interview prep guide, or an onboarding wiki for aspiring/junior PMs.
+## Install
 
-## Skill Areas
+```bash
+npx skills add PM-HabeebJimoh/Aduns-duns --skill product-manager --global
+```
 
-| # | Area | What it covers |
-|---|------|----------------|
-| 1 | [Product Discovery](./01-product-discovery.md) | User research, problem framing, opportunity sizing, validation |
-| 2 | [Product Strategy](./02-product-strategy.md) | Vision, positioning, roadmapping, prioritization, business models |
-| 3 | [Execution & Delivery](./03-execution-and-delivery.md) | PRDs, agile/scrum, working with engineering & design, launches |
-| 4 | [Analytics & Data](./04-analytics-and-data.md) | Metrics frameworks, experimentation, SQL, product analytics tools |
-| 5 | [Leadership & Communication](./05-leadership-and-communication.md) | Stakeholder mgmt, influence without authority, storytelling, teamwork |
-| 6 | [Technical Fluency](./06-technical-fluency.md) | Systems thinking, APIs, data models, AI/ML literacy |
-| 7 | [Business & Commercial Acumen](./07-business-and-commercial-acumen.md) | Unit economics, GTM, pricing, competitive analysis |
-| 8 | [Design & UX Sense](./08-design-and-ux-sense.md) | Design principles, usability heuristics, accessibility |
+Or copy the folder manually into your agent's skills directory:
 
-## How to use this repo
+```bash
+cp -r skills/product-manager ~/.claude/skills/
+# or ~/.codex/skills/, ~/.cursor/skills/, etc.
+```
 
-- **Self-assessment**: rate yourself 1–5 on each sub-skill inside a file.
-- **Learning plan**: pick 2–3 weak sub-skills per quarter and work through the linked resources.
-- **Interview prep**: each file's "What great looks like" section maps to common PM interview signals.
-- **Onboarding**: share the folder with new hires or career-switchers as a mental model of the role.
+## What's Inside
 
-## Career levels at a glance
+```text
+skills/
+└── product-manager/
+    ├── SKILL.md                          # Main skill — activation, workflow, response format
+    ├── references/
+    │   ├── prd-template.md               # Canonical PRD structure with field-by-field guidance
+    │   ├── prioritization-frameworks.md  # RICE, ICE, WSJF, Kano, MoSCoW — when to use each
+    │   ├── metrics-frameworks.md         # North Star, AARRR, HEART, input vs. output metrics
+    │   ├── discovery-playbook.md         # Continuous discovery, JTBD, interview scripts
+    │   ├── okr-guide.md                  # Writing outcome-based OKRs, common anti-patterns
+    │   ├── stakeholder-comms.md          # Status updates, escalation, exec review formats
+    │   └── launch-checklist.md           # Beta → GA rollout gates, comms, rollback plans
+    ├── examples/
+    │   ├── prd-example.md                # A filled-in PRD for a fictional feature
+    │   ├── rice-scoring-example.md       # A worked RICE prioritization
+    │   └── weekly-update-example.md      # A well-written weekly stakeholder update
+    └── scripts/
+        └── new-prd.sh                    # Scaffolds a new PRD from the template
+```
 
-| Level | Primary focus |
-|-------|---------------|
-| Associate PM / APM | Execution, learning the craft, shipping features under guidance |
-| Product Manager | Owning a feature area end-to-end, discovery → launch → iteration |
-| Senior PM | Owning a product line, driving strategy, mentoring |
-| Group / Principal PM | Cross-product strategy, org-level bets, coaching PMs |
-| Director / VP Product | Team building, portfolio strategy, exec stakeholder alignment |
-| CPO | Company-wide product vision, board-level narrative |
+## Skills Provided
+
+### `product-manager`
+Acts as an embedded senior PM. Activates proactively when the user is:
+- Writing a PRD, spec, one-pager, or launch doc
+- Prioritizing a backlog or roadmap
+- Defining success metrics or OKRs
+- Preparing a stakeholder update or exec review
+- Framing a discovery / research plan
+- Planning a launch (beta, phased rollout, GA)
+
+And explicitly when the user says things like *"write a PRD for…"*, *"prioritize this list"*, *"what metric should I track"*, *"help me plan the launch"*, *"draft an OKR"*, *"how should I frame this to the exec team"*.
+
+## Design Principles
+
+Same as the shadcn skill philosophy:
+
+1. **Search / template before generating from scratch.** Reuse the canonical PRD, OKR, and update formats in `references/` before inventing new ones.
+2. **Small, composable references.** Each reference file solves one thing well. The main `SKILL.md` stays short and routes the agent to the right reference.
+3. **Concrete over abstract.** Every reference includes a worked example — no generic advice without a filled-in artifact next to it.
+4. **Action-oriented output.** Responses end with the next decision, not with a summary.
+
+## Compatibility
+
+- Claude Code (`~/.claude/skills/`)
+- Codex CLI (`~/.codex/skills/`)
+- Cursor & Windsurf (`.cursor/skills/`, `.windsurf/skills/`)
+- Any agent that reads YAML-frontmatter Markdown skills
 
 ## Contributing
 
-This is a living document. Add new sub-skills, replace outdated resources, or open a PR with a new skill file if you spot a gap.
+PRs welcome. Highest-value additions:
+- New reference files (competitive teardowns, pricing frameworks, incident post-mortems)
+- More worked examples in `examples/`
+- Localized versions of the PRD template
 
----
-_Maintained as part of the Aduns-duns knowledge base._
+## License
+
+MIT
