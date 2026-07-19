@@ -1,77 +1,54 @@
-# product-manager-skillset
+# product-manager
 
-Agent Skills for working alongside a Product Manager (PM) — following the [shadcn skill format](https://github.com/shadcn-ui/ui/tree/main/skills). Drop these into any agent that supports Agent Skills (Claude Code, Codex CLI, Cursor, Windsurf, etc.) and it will proactively help with discovery, PRDs, prioritization, metrics, and launches — using the same conventions and vocabulary a senior PM would.
+Agent Skill for Product Management work, written in the exact format used by the official [`shadcn-ui/ui`](https://github.com/shadcn-ui/ui/tree/main/skills/shadcn) skill: a `SKILL.md` with YAML frontmatter (`name`, `description`, `user-invocable`, `allowed-tools`), companion topic docs at the skill root, and a `rules/` directory of Incorrect/Correct pattern pairs.
 
 ## Install
 
-```bash
-npx skills add PM-HabeebJimoh/Aduns-duns --skill product-manager --global
-```
-
-Or copy the folder manually into your agent's skills directory:
+Copy the skill directory into your agent's skills folder:
 
 ```bash
+# Claude Code
+mkdir -p ~/.claude/skills
 cp -r skills/product-manager ~/.claude/skills/
-# or ~/.codex/skills/, ~/.cursor/skills/, etc.
+
+# Cursor / Windsurf
+mkdir -p .cursor/skills
+cp -r skills/product-manager .cursor/skills/
+
+# Copilot (AGENTS.md style)
+curl -fsSL https://raw.githubusercontent.com/PM-HabeebJimoh/Aduns-duns/main/github_repos/product-manager-skillset/skills/product-manager/SKILL.md >> AGENTS.md
 ```
 
-## What's Inside
+## Structure
+
+Mirrors [`skills/shadcn/`](https://github.com/shadcn-ui/ui/tree/main/skills/shadcn) exactly:
 
 ```text
-skills/
-└── product-manager/
-    ├── SKILL.md                          # Main skill — activation, workflow, response format
-    ├── references/
-    │   ├── prd-template.md               # Canonical PRD structure with field-by-field guidance
-    │   ├── prioritization-frameworks.md  # RICE, ICE, WSJF, Kano, MoSCoW — when to use each
-    │   ├── metrics-frameworks.md         # North Star, AARRR, HEART, input vs. output metrics
-    │   ├── discovery-playbook.md         # Continuous discovery, JTBD, interview scripts
-    │   ├── okr-guide.md                  # Writing outcome-based OKRs, common anti-patterns
-    │   ├── stakeholder-comms.md          # Status updates, escalation, exec review formats
-    │   └── launch-checklist.md           # Beta → GA rollout gates, comms, rollback plans
-    ├── examples/
-    │   ├── prd-example.md                # A filled-in PRD for a fictional feature
-    │   ├── rice-scoring-example.md       # A worked RICE prioritization
-    │   └── weekly-update-example.md      # A well-written weekly stakeholder update
-    └── scripts/
-        └── new-prd.sh                    # Scaffolds a new PRD from the template
+skills/product-manager/
+├── SKILL.md              # Main entry — frontmatter + Principles + Critical Rules → rules/*
+├── discovery.md          # Companion — user research, JTBD, interview technique
+├── prd.md                # Companion — PRD canonical structure and field-by-field guidance
+├── prioritization.md     # Companion — RICE / ICE / WSJF / Kano / MoSCoW selection & scoring
+├── metrics.md            # Companion — North Star, AARRR, HEART, OKRs, metric definitions
+├── launch.md             # Companion — dogfood → beta → % rollout → GA gates
+├── rules/                # Enforced patterns with Incorrect/Correct pairs
+│   ├── problem-framing.md
+│   ├── prd-structure.md
+│   ├── metrics-definition.md
+│   ├── okrs.md
+│   ├── prioritization.md
+│   ├── stakeholder-comms.md
+│   └── launch-safety.md
+├── agents/               # (reserved) sub-agent prompts
+├── assets/               # (reserved) diagrams, templates
+└── evals/                # Prompt/response evals for skill quality
+    └── prd-quality.md
 ```
 
-## Skills Provided
-
-### `product-manager`
-Acts as an embedded senior PM. Activates proactively when the user is:
-- Writing a PRD, spec, one-pager, or launch doc
-- Prioritizing a backlog or roadmap
-- Defining success metrics or OKRs
-- Preparing a stakeholder update or exec review
-- Framing a discovery / research plan
-- Planning a launch (beta, phased rollout, GA)
-
-And explicitly when the user says things like *"write a PRD for…"*, *"prioritize this list"*, *"what metric should I track"*, *"help me plan the launch"*, *"draft an OKR"*, *"how should I frame this to the exec team"*.
-
-## Design Principles
-
-Same as the shadcn skill philosophy:
-
-1. **Search / template before generating from scratch.** Reuse the canonical PRD, OKR, and update formats in `references/` before inventing new ones.
-2. **Small, composable references.** Each reference file solves one thing well. The main `SKILL.md` stays short and routes the agent to the right reference.
-3. **Concrete over abstract.** Every reference includes a worked example — no generic advice without a filled-in artifact next to it.
-4. **Action-oriented output.** Responses end with the next decision, not with a summary.
-
-## Compatibility
-
-- Claude Code (`~/.claude/skills/`)
-- Codex CLI (`~/.codex/skills/`)
-- Cursor & Windsurf (`.cursor/skills/`, `.windsurf/skills/`)
-- Any agent that reads YAML-frontmatter Markdown skills
-
-## Contributing
-
-PRs welcome. Highest-value additions:
-- New reference files (competitive teardowns, pricing frameworks, incident post-mortems)
-- More worked examples in `examples/`
-- Localized versions of the PRD template
+Same conventions as the official shadcn skill:
+- `SKILL.md` links out to each rule file via `→ [name.md](./rules/name.md)`
+- Rules files open with a `## Contents` list, then one `##` heading per rule, then **Incorrect** / **Correct** blocks separated by `---`
+- Companion docs at the skill root (like shadcn's `cli.md`, `customization.md`, `mcp.md`, `registry.md`) hold deep reference material
 
 ## License
 
