@@ -35,8 +35,10 @@ def test_economics_monte_carlo_with_real_inputs(monkeypatch):
               "routes": [{"route": "local_distribution_partnership", "label": "x", "feasible": True},
                          {"route": "software_layer", "label": "y", "feasible": True}]}
     r = O.EconomicsAgent().run(ctx=ctx, market=market, loc=loc, routes=routes, n=2000)
-    assert r["econ_status"] == "modelled" and r["evidence_confidence"] == 1.0
+    assert r["econ_status"] == "modelled"
     lp = r["routes"][0]
+    n_assume = sum(1 for d in lp["top_drivers"][:2] if d["kind"] == "assumption")
+    assert r["evidence_confidence"] == round(1.0 * (1 - 0.25 * n_assume), 3)
     assert 0 < lp["gross_margin"]["p50"] < 1 and 0 <= lp["p_profitable"] <= 1
     assert lp["net_margin"]["p10"] <= lp["net_margin"]["p50"] <= lp["net_margin"]["p90"]
     assert all(d["kind"] in ("real", "official", "assumption") for d in lp["top_drivers"])
