@@ -41,8 +41,9 @@ amp quot nbsp would could us via per etc ever every since already re ve ll isnt 
 
 # Words that come from our own query templates (autocomplete prefixes) — not information about the need.
 QUERY_TEMPLATE_WORDS = re.compile(
-    r"\b(where to buy|where can i get|how to get|price in|prices in|near me|for sale|for rent|not available in|"
-    r"supplier in|who repairs|why is|so expensive in|shortage in|cheap|cheapest)\b", re.I)
+    r"\b(where to buy|where can i (get|buy|find)|where to (get|find)|how (to|can i) get|how much (is|does)|"
+    r"price (of|in)|prices (of|in)|near me|for sale|for rent|not available in|supplier in|who repairs|why (is|are)|"
+    r"so expensive|too expensive|expensive|shortage (of|in)|cheap|cheapest|in my area)\b", re.I)
 
 _TOKEN = re.compile(r"[a-z][a-z0-9\-]{1,30}")
 

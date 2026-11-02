@@ -63,7 +63,7 @@ _SHARED: dict[str, bool] = {}
 def _shared_language(lang: str) -> bool:
     """Is this language spoken as a primary language in several countries (needs a country keyword)?"""
     if lang not in _SHARED:
-        _SHARED[lang] = sum(1 for c in geo.countries().values() if c["langs"] and c["langs"][0] == lang) > 2
+        _SHARED[lang] = sum(1 for c in geo.countries().values() if lang in c["langs"][:2]) >= 2
     return _SHARED[lang]
 
 
@@ -334,9 +334,11 @@ class NeedSensingAgent(Agent):
                     self.bump("dropped_not_about_country")
                     continue
             # Country-scoped feeds belong to the sweep country even when the text doesn't name it.
-            if scope and scope not in countries and (src in ("googletrends", "googlesuggest", "googlenews", "youtube",
-                                                             "reddit", "telegram", "googleplay", "wfp_prices", "gdelt",
-                                                             "worldbank_procurement", "prozorro", "secop") or not countries):
+            # Inherently local feeds are pinned to the sweep country; for news/video, an explicit mention of other
+            # countries wins (the item is attributed to where it is actually about).
+            if scope and scope not in countries and (src in ("googletrends", "googlesuggest", "reddit", "telegram",
+                                                             "googleplay", "wfp_prices", "worldbank_procurement",
+                                                             "prozorro", "secop") or not countries):
                 countries.insert(0, scope)
             sig_scope = scope if scope in countries else (countries[0] if countries else None)
             cont = geo.country(sig_scope)["continent"] if sig_scope and geo.country(sig_scope) else None
