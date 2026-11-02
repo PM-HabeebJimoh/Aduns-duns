@@ -9,9 +9,8 @@ first). For each country, measured in its own language and news edition over the
                        ("startup", "launches", "now available", "expands", "solved", "reduced" …)
   need_pressure      – local news about T being short / unaffordable / in crisis, plus the engine's own
                        sensed need signals about T in that country
-  digital_supply     – apps addressing T in that country's Google Play storefront
 
-Positive deviants = countries with clearly more solution activity and less need pressure than the target.
+Positive deviants = countries with ≥3 recent local solution reports and a lower need-pressure share than the target.
 Their solution headlines and apps are returned as the evidence of *how* they solved it.
 Official WDI statistics are available as an optional, clearly-labelled secondary cross-check.
 """
@@ -48,7 +47,7 @@ SOLUTION_WORDS = {
 
 def _topic_from_hyp(hyp: dict) -> str:
     base = (hyp.get("title") or "").split(" — ")[0]
-    words = [w for w in nlp.tokens(geo.strip_places(base)) if w not in {"price", "sale", "cheap", "buy", "near"}]
+    words = nlp.tokens(nlp.need_object(geo.strip_places(base)))
     if not words:
         words = db.loads(hyp.get("key_terms"), [])[:1]
     return " ".join(dict.fromkeys(words))[:60]
@@ -82,11 +81,10 @@ class CrossBorderAnalogyAgent(Agent):
         ranked = []
         for k in peers:
             m = measures[k]
-            if m["solution"] <= t["solution"] and m["apps"] <= t["apps"]:
+            # needs real evidence of solutions (≥3 recent local reports) and lower pressure than the target
+            if m["solution"] < 3 or m["pressure_share"] >= t["pressure_share"]:
                 continue
-            if m["pressure_share"] >= t["pressure_share"] and m["pressure_share"] > 0.5:
-                continue
-            gain = (math.log1p(m["solution"]) - math.log1p(t["solution"])) + 0.5 * (math.log1p(m["apps"]) - math.log1p(t["apps"]))
+            gain = math.log1p(m["solution"]) / math.log1p(40)
             relief = t["pressure_share"] - m["pressure_share"]
             same_income = geo.country(k)["income_id"] == target["income_id"]
             score = round(max(0.0, gain) * 0.6 + max(0.0, relief) * 0.8 + (0.2 if same_income else 0.0), 4)
@@ -151,14 +149,12 @@ class CrossBorderAnalogyAgent(Agent):
         from .need_sensing import _ts
         sol = [s for s in sol if (_ts(s["published_at"]) or 0) >= cutoff]
         need = [s for s in need if (_ts(s["published_at"]) or 0) >= cutoff]
-        apps = self.safe(f"apps:{iso3}", lambda: S.play_search(topic, c["iso2"], "en", 8), []) or []
-        tw = [w for w in nlp.tokens(topic) if len(w) > 3]
-        apps_rel = [a for a in apps if any(w[:5] in a.lower() for w in tw)]
+        apps_rel: list[str] = []   # Play search is not storefront-specific, so apps are not used as a country measure
         own = db.q1("""SELECT COUNT(*) n FROM signals WHERE scope_country=? AND (text_en LIKE ? OR text LIKE ?)
                        AND COALESCE(published_ts, retrieved_at) >= ?""",
                     (iso3, f"%{topic.split()[0]}%", f"%{local_topic.split()[0]}%", cutoff))["n"]
         pressure = len(need) + own
-        share = pressure / (pressure + len(sol) + len(apps_rel) + 1)
+        share = (pressure + 1) / (pressure + len(sol) + 2)
         evidence = [{"source": "news", "title": s["title"], "url": s["url"], "date": (s["published_at"] or "")[:10],
                      "kind": "solution"} for s in sol[:6]]
         evidence += [{"source": "googleplay", "title": a, "url": f"https://play.google.com/store/apps/details?id={a}&gl={c['iso2']}",

@@ -192,7 +192,7 @@ class CapabilityDiscoveryAgent(Agent):
     def _query_from_hypothesis(self, hyp: dict | None, terms: list[str]) -> str:
         """The thing that is needed: the hypothesis object (title before ' — '), minus commerce noise."""
         base = (hyp or {}).get("title", "").split(" — ")[0] if hyp else ""
-        words = [w for w in nlp.tokens(geo.strip_places(base)) if w not in self.NOISE]
+        words = [w for w in nlp.tokens(nlp.need_object(geo.strip_places(base))) if w not in self.NOISE]
         if not words:
             words = [w for w in nlp.tokens(geo.strip_places(self._query_from_terms(terms))) if w not in self.NOISE]
         return " ".join(dict.fromkeys(words))[:80] or " ".join(terms[:2])
@@ -200,7 +200,9 @@ class CapabilityDiscoveryAgent(Agent):
     @staticmethod
     def _generic_query(q: str, domain: str | None) -> str | None:
         generic = {
-            "cold_chain": "refrigeration", "energy": "off-grid power", "water_sanitation": "water treatment",
+            "cold_chain": "refrigeration", "energy": "off-grid power", "food": "processing", "fuel": "alternative fuel",
+            "mobility": "transport service", "jobs_income": "skills training", "public_services": "e-government",
+            "consumer_goods": "local manufacturing", "disaster_climate": "early warning", "care": "care service", "water_sanitation": "water treatment",
             "health": "low-cost medical device", "medicines": "drug supply", "agriculture": "smallholder",
             "finance": "microfinance", "digital": "connectivity", "logistics": "last mile delivery",
             "manufacturing": "local manufacturing", "education_skills": "vocational training",
@@ -209,7 +211,9 @@ class CapabilityDiscoveryAgent(Agent):
         if not generic:
             return None
         head = q.split()[0] if q else ""
-        return f"{head} {generic}".strip() if head and head not in generic else generic
+        if not head:
+            return generic
+        return f"{q} {generic}" if len(q.split()) == 1 else (f"{head} {generic}" if head not in generic else generic)
 
     @staticmethod
     def _query_from_terms(terms: list[str]) -> str:

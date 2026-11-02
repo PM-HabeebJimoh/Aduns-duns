@@ -200,7 +200,7 @@ def signals(source: str = "", layer: str = "", domain: str = "", q: str = "", co
 
 
 def _hyp(r: dict) -> dict:
-    for k in ("key_terms", "countries", "need_types", "gap_causes", "score_breakdown", "tests", "llm_summary"):
+    for k in ("key_terms", "countries", "need_types", "gap_causes", "score_breakdown", "tests", "llm_summary", "continents"):
         r[k] = db.loads(r[k], None)
     return r
 

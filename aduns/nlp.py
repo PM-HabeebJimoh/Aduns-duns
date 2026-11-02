@@ -299,3 +299,14 @@ PUBLISHER_SUFFIX = re.compile(r"\s+[-–|]\s+[^-–|]{2,60}$")
 def strip_publisher(title: str) -> str:
     """'Milk shortage bites - The Star, Kenya' → 'Milk shortage bites'."""
     return PUBLISHER_SUFFIX.sub("", title or "").strip()
+
+
+NEED_WORDS = {"shortage", "shortages", "scarcity", "crisis", "lack", "price", "prices", "expensive", "cost", "costs",
+              "hike", "unmet", "need", "needs", "problem", "problems", "issue", "issues", "rising", "high", "unaffordable",
+              "supply", "bites", "looms", "find", "buy", "where", "get", "cheap", "cheapest", "sale", "near"}
+
+
+def need_object(text: str) -> str:
+    """The thing that is needed: 'Milk shortage' → 'milk', 'Fuel supply crisis' → 'fuel'."""
+    words = [w for w in tokens(text) if w not in NEED_WORDS]
+    return " ".join(dict.fromkeys(words))

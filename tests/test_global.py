@@ -39,3 +39,32 @@ def test_scheduler_picks_one_country_per_continent():
     picks = Daemon().next_countries()
     conts = [geo.country(p)["continent"] for p in picks]
     assert sorted(conts) == sorted(set(conts)) and len(conts) == 6
+
+
+def test_need_object_and_publisher_strip():
+    from aduns import nlp
+    assert nlp.need_object("Milk shortage") == "milk"
+    assert nlp.need_object("Fuel supply crisis") == "fuel"
+    assert nlp.strip_publisher("Milk shortage bites - The Star, Kenya") == "Milk shortage bites"
+
+
+def test_fusion_merges_across_languages_via_translation():
+    import json
+    import time as _t
+    from aduns import db
+    from aduns.agents import SignalFusionAgent
+    now = _t.time()
+    texts = [("es", "escasez de insulina en farmacias", "insulin shortage in pharmacies", "ARG", "South America"),
+             ("fr", "pénurie d'insuline dans les pharmacies", "insulin shortage in pharmacies", "SEN", "Africa"),
+             ("en", "Insulin shortage hits pharmacies again", "Insulin shortage hits pharmacies again", "PHL", "Asia")]
+    for i, (lang, t, en, c, cont) in enumerate(texts):
+        db.insert("signals", {"source": ["bluesky", "googlenews", "youtube"][i], "layer": "scattered", "external_id": f"t{i}",
+                              "url": None, "title": t, "text": t, "text_en": en, "lang": lang, "retrieved_at": now,
+                              "published_ts": now, "content_hash": f"fuse-test-{i}", "domain": "medicines",
+                              "need_types": json.dumps(["scarcity"]), "gap_causes": "[]", "intensity": 0.5,
+                              "need_score": 0.8, "countries": json.dumps([c]), "entities": json.dumps(["insulin"]),
+                              "engagement": 0.1, "scope_country": c, "continent": cont})
+    r = SignalFusionAgent().run(domain="medicines", window_days=5)
+    hs = db.q("SELECT * FROM hypotheses WHERE id IN (%s)" % ",".join(map(str, r["hypothesis_ids"])))
+    big = max(hs, key=lambda h: h["signal_count"])
+    assert big["signal_count"] == 3 and big["scope"] == "global"

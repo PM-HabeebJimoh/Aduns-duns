@@ -316,7 +316,8 @@ def youtube_knowhow(query: str, iso2: str = "US", lang: str = "en", limit: int =
     """Practical know-how / skills: recent 'how to make / repair / build' videos (people who can teach it)."""
     S = _social()
     out = []
-    for v in S.youtube_search(f"how to make {query}", iso2, lang, limit) + S.youtube_search(f"{query} repair", iso2, lang, 4):
+    for v in (S.youtube_search(f"how to start {query} business", iso2, lang, limit)
+              + S.youtube_search(f"{query} production training", iso2, lang, 4)):
         out.append({"source": "youtube", "capability_type": "skill_knowhow", "external_id": v["external_id"],
                     "url": v["url"], "title": v["title"], "description": v["text"], "holder": v["author"],
                     "countries": [], "year": None, "maturity": min(0.6, 0.2 + v["engagement"]),
