@@ -279,6 +279,7 @@ class OfflineScoutCoordinator(Agent):
             "JOIN <name> | <role> | <country> | <town>  (you agree to share observations; paid per validated report)\n"
             "OBS <mission-code> <what you saw/heard>  (respondent agreed)\n"
             "PRICE <mission-code> <amount> <currency> <item> @ <place>\n"
+            "WAIT <code> · ORDER <code> <qty> · FEEDBACK <code> <text>  (customers)\n"
             "MISSIONS  – list open missions\nSTOP – withdraw")
 
     def handle_message(self, sender: str, body: str, channel: str = "sms") -> str:
@@ -308,6 +309,23 @@ class OfflineScoutCoordinator(Agent):
                 code, _, txt = rest.partition(" ")
                 r = self.submit_observation(code.upper(), sender, txt, channel=channel, consent_confirmed=True)
                 return f"Thanks! Observation #{r['observation_id']} recorded ({r['status']})."
+            if cmd in ("WAIT", "ORDER", "FEEDBACK"):
+                from .execution import customer_signup
+                parts = rest.split(" ", 1)
+                slug = parts[0].lower() if parts else ""
+                tail = parts[1] if len(parts) > 1 else ""
+                if cmd == "WAIT":
+                    r = customer_signup(slug, sender, channel, consent=True, stage="waitlist")
+                    return "You're on the waitlist. We'll message you before launch. Reply STOP to opt out."
+                if cmd == "ORDER":
+                    try:
+                        qty = float(tail.split()[0]) if tail else 1.0
+                    except ValueError:
+                        return "Format: ORDER <code> <quantity>"
+                    r = customer_signup(slug, sender, channel, consent=True, stage="preorder", quantity=qty)
+                    return f"Pre-order noted (#{r['customer_id']}, qty {qty:g}). No payment taken — we'll confirm price first."
+                r = customer_signup(slug, sender, channel, consent=True, stage="waitlist", message=tail)
+                return "Thank you — your feedback was recorded."
             if cmd == "PRICE":
                 m = re.match(r"(\S+)\s+([\d.,]+)\s+([A-Za-z]{3})\s+(.+?)(?:\s+@\s+(.+))?$", rest)
                 if not m:

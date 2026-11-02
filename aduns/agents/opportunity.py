@@ -398,6 +398,7 @@ class EconomicsAgent(Agent):
         price_sum = loc["local_price_evidence"]["usd_summary"]
         unit_cost = routes["inputs"]["unit_cost_usd"]
         inputs: dict[str, dict] = {}
+        measured = _measured_inputs(ctx)          # real outcomes from experiments override everything else
         if price_sum:
             lo, hi = price_sum["p25"], max(price_sum["p75"], price_sum["p25"] * 1.01)
             if price_sum.get("weak"):
@@ -413,6 +414,9 @@ class EconomicsAgent(Agent):
         if "unit_cost_usd" not in inputs and price_sum:
             inputs["unit_cost_usd"] = {"range": [price_sum["median"] * 0.45, price_sum["median"] * 0.7], "kind": "assumption",
                                        "source": "COGS 45–70% of local price — verify with suppliers"}
+        for k in ("price_usd", "unit_cost_usd"):
+            if k in measured:
+                inputs[k] = measured[k]
         if "price_usd" not in inputs:
             return {"econ_status": "insufficient_data", "missing": ["local price", "unit cost"],
                     "next_step": "Collect ≥10 local price quotes and ≥3 supplier quotes via the field mission."}
@@ -433,6 +437,7 @@ class EconomicsAgent(Agent):
             inputs[k] = {"range": [a, b], "kind": "assumption", "source": "verify tariff schedule & freight quotes"}
         inputs["income_tax"] = {"range": [0.15, 0.35], "kind": "assumption", "source": "verify national corporate tax rate"}
         inputs["working_capital_days"] = {"range": [30, 90], "kind": "assumption", "source": "supplier/customer terms"}
+        inputs.update(measured)
         results = []
         top = [r for r in routes["routes"] if r["feasible"]][:3]
         for r in top:
@@ -480,7 +485,7 @@ class EconomicsAgent(Agent):
             })
         key = ["price_usd", "unit_cost_usd", "market_usd"]
         confidence = round(sum((0.5 if inputs.get(k, {}).get("weak") else 1.0) for k in key
-                               if inputs.get(k, {}).get("kind") in ("real", "official")) / len(key), 3)
+                               if inputs.get(k, {}).get("kind") in ("real", "official", "measured")) / len(key), 3)
         # results whose top-2 drivers include unverified assumptions (e.g. import duty) deserve less confidence
         if results:
             n_assume = sum(1 for d in results[0]["top_drivers"][:2] if d["kind"] == "assumption")
@@ -560,3 +565,15 @@ def _ensure_table() -> None:
             best_route TEXT, p_profitable REAL, opportunity_score REAL, evidence_confidence REAL, status TEXT,
             created_at REAL, updated_at REAL,
             UNIQUE(hypothesis_id, country))""")
+
+
+
+def _measured_inputs(ctx: dict) -> dict[str, dict]:
+    """Values measured by Execution experiments (tariff, supplier cost, price, conversion…) for this opportunity."""
+    try:
+        rows = db.q("""SELECT m.* FROM measured_inputs m JOIN opportunities o ON o.id=m.opportunity_id
+                       WHERE o.hypothesis_id=? AND o.country=? ORDER BY m.at""", (ctx["hyp"]["id"], ctx["iso3"]))
+    except Exception:  # noqa: BLE001 — table not created yet (no experiments ran)
+        return {}
+    return {r["key"]: {"range": [r["low"], max(r["high"], r["low"] * 1.0001)], "kind": "measured",
+                       "source": f"experiment #{r['experiment_id']}: {r['source']}"} for r in rows}

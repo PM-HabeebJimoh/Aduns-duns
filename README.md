@@ -130,6 +130,23 @@ approve pilot), with a numbered list of conditions. The 24/7 loop reviews new or
 Dashboard: **Governance** tab. API: `/api/governance`, `/api/governance/{id}`, `/api/governance/{id}/approve`,
 `/api/ledger/verify`.
 
-## Roadmap (next layers)
-4. Execution: experiments, partnerships, operations, customers, finance, expansion.
-5. Learning from real outcomes.
+## Layer 4 — Execution (`aduns/agents/execution.py`) and the learning loop
+
+| Agent | What it does |
+|---|---|
+| **Experiment** | Turns governance kill criteria and Economics validation priorities into tests, each with a sample size and decision rule: problem interviews (field mission), verified local price (≥10 quotes), supplier quotes, **tariff verification** (WTO TTD / MacMap / national tariff), smoke test (landing-page or SMS conversion > 2%), and a ≤50-customer pilot (net margin). Evaluates with **Bayesian Beta updates** on real events. Pass or fail is recorded in the ledger. **Measured values replace assumptions in Economics** (kind `measured`), and interview outcomes confirm or reject the hypothesis, so the discovery scoring learns. |
+| **Partnership** | Shortlists real counterparties from discovered capabilities and suppliers. Uses **publicly published contacts only**: the app developer's own domain, official websites, OSM contact tags and supplier pages. Every partner is sanctions-screened. Writes outreach drafts in English and the local language. Pipeline stages are set by humans, and moving to "contacted" requires approval. |
+| **Operations** | A workflow for the chosen route; a lead-time estimate (great-circle distance from the main supplier country, with explicit assumptions); an inventory policy (reorder point, safety stock); infrastructure adaptations, payment rails, compliance tasks and KPIs. |
+| **Customer** | A landing page in English and the local language (waitlist or pre-order, consent required, **no payment taken**) served at `/x/{slug}` **only after approval**. Real visits and sign-ups feed the smoke test. SMS, WhatsApp and Telegram commands: `WAIT <code>`, `ORDER <code> <qty>`, `FEEDBACK <code> <text>`, `STOP`. |
+| **Finance** | Actuals from entries a named person records with a reference (revenue, refunds, COGS, CAC, opex, capex) in any currency, converted at live rates. Compares them with the model's p10–p90, flags variances, and writes the measured gross margin back. |
+| **Expansion** | Next countries where the same need appears (same cluster or related hypotheses), ranked by real import market size (Comtrade), shared language, continent and sanctions. |
+
+**Safety gates:** the Execution Coordinator plans for any governed opportunity; it skips a "reject" unless a human
+has overridden it. Outward actions (publishing a page, contacting a partner, recording money) raise `403` until a
+named human approves the opportunity in Governance. Nothing is synthesised: customers, quotes, interviews and money
+come only from real people and evidence links.
+
+## Roadmap
+- Payment-provider and mobile-money webhooks to record real transactions automatically (today entries are human-signed).
+- Tariff data feed (when a free, reachable source exists) to remove the last major assumption.
+- EU / UN sanctions lists alongside the US list; country-specific licence look-ups.

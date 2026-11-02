@@ -620,3 +620,143 @@ def ledger_verify():
 def ledger_chain(limit: int = 200):
     G._chain_tables()
     return db.q("SELECT * FROM ledger_chain ORDER BY id DESC LIMIT ?", (limit,))
+
+
+
+# ----------------------------------------------------------------- execution (layer 4)
+from .agents import execution as X  # noqa: E402
+from fastapi.responses import HTMLResponse  # noqa: E402
+from html import escape as _esc  # noqa: E402
+
+
+@app.post("/api/agents/execution")
+def execution_run(req: dict):
+    return _job("execution_coordinator", X.ExecutionCoordinator().run, opportunity_id=int(req["opportunity_id"]))
+
+
+@app.get("/api/execution/{opportunity_id}")
+def execution_detail(opportunity_id: int):
+    X.ensure_tables()
+    exps = db.q("SELECT * FROM experiments WHERE opportunity_id=? ORDER BY id", (opportunity_id,))
+    for e in exps:
+        e["result"] = db.loads(e["result"], {})
+        e["events"] = db.q("SELECT kind, value, success, text, evidence_url, actor, at FROM experiment_events "
+                           "WHERE experiment_id=? ORDER BY at DESC LIMIT 20", (e["id"],))
+    partners = db.q("SELECT * FROM partners WHERE opportunity_id=? ORDER BY fit DESC", (opportunity_id,))
+    for p in partners:
+        for k in ("contacts", "screening", "outreach"):
+            p[k] = db.loads(p[k], {})
+    plans = {r["kind"]: db.loads(r["plan"], {}) for r in db.q("SELECT kind, plan FROM execution_plans WHERE opportunity_id=?",
+                                                              (opportunity_id,))}
+    page = db.q1("SELECT * FROM landing_pages WHERE opportunity_id=?", (opportunity_id,))
+    if page:
+        page["content"] = db.loads(page["content"], {})
+    o = db.q1("SELECT object, country, status, best_route FROM opportunities WHERE id=?", (opportunity_id,))
+    return {"opportunity": o, "approved": X.approved(opportunity_id), "experiments": exps, "partners": partners,
+            "plans": plans, "landing_page": page,
+            "customers": db.q("SELECT stage, COUNT(*) n FROM customers WHERE opportunity_id=? GROUP BY stage", (opportunity_id,)),
+            "measured_inputs": db.q("SELECT * FROM measured_inputs WHERE opportunity_id=?", (opportunity_id,)),
+            "finance": X.FinanceAgent.actuals(opportunity_id)}
+
+
+class EventReq(BaseModel):
+    actor: str
+    kind: str                 # quote | rate | interview | note
+    value: Optional[float] = None
+    success: Optional[bool] = None
+    text: str = ""
+    evidence_url: str = ""
+
+
+@app.post("/api/experiments/{experiment_id}/events")
+def experiment_event(experiment_id: int, req: EventReq):
+    try:
+        return X.record_event(experiment_id, req.actor, req.kind, req.value, req.success, req.text, req.evidence_url)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+class FinanceReq(BaseModel):
+    actor: str
+    kind: str
+    amount: float
+    currency: str
+    units: Optional[float] = None
+    reference: str
+    evidence_url: str = ""
+
+
+@app.post("/api/execution/{opportunity_id}/finance")
+def finance_entry(opportunity_id: int, req: FinanceReq):
+    try:
+        return X.record_finance(opportunity_id, req.actor, req.kind, req.amount, req.currency, req.units, req.reference,
+                                req.evidence_url)
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+class StageReq(BaseModel):
+    stage: str
+    actor: str
+    notes: str = ""
+
+
+@app.post("/api/partners/{partner_id}/stage")
+def partner_stage(partner_id: int, req: StageReq):
+    try:
+        return X.set_partner_stage(partner_id, req.stage, req.actor, req.notes)
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/pages/{slug}/publish")
+def page_publish(slug: str, req: dict):
+    try:
+        return X.publish_page(slug, str(req.get("actor", "")))
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+def _page_html(p: dict, lang: str, msg: str = "") -> str:
+    c = db.loads(p["content"], {})
+    t = c.get(lang) or c["en"]
+    langs = [k for k in c if isinstance(c[k], dict)]
+    faq = "".join(f"<details><summary>{_esc(x['q'])}</summary><p>{_esc(x['a'])}</p></details>" for x in t["faq"])
+    switch = " · ".join(f'<a href="?lang={l}">{l}</a>' for l in langs)
+    return f"""<!doctype html><html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{_esc(t['headline'])}</title><style>body{{font:16px/1.5 system-ui,sans-serif;max-width:560px;margin:0 auto;padding:16px;color:#1b1f24;background:#f6f7f9}}
+.card{{background:#fff;border:1px solid #e3e6ea;border-radius:10px;padding:18px;margin:12px 0}}input,button{{font:inherit;padding:10px;width:100%;box-sizing:border-box;margin:6px 0;border-radius:6px;border:1px solid #ccd}}
+button{{background:#0f6e5a;color:#fff;border:0;font-weight:600}}.ok{{color:#12754a}}.muted{{color:#667080;font-size:13px}}</style></head><body>
+<p class="muted">{switch}</p><div class="card"><h1>{_esc(t['headline'])}</h1><p>{_esc(t['body'])}</p>
+{f'<p class="ok">{_esc(msg)}</p>' if msg else ''}
+<form method="post"><input name="handle" placeholder="Phone or email" required><label class="muted"><input type="checkbox" name="consent" required style="width:auto"> {_esc(t['consent'])}</label>
+<button>{_esc(t['cta'])}</button></form><p class="muted">SMS/WhatsApp: WAIT {_esc(p['slug'])}</p></div><div class="card">{faq}</div></body></html>"""
+
+
+@app.get("/x/{slug}", response_class=HTMLResponse, include_in_schema=False)
+def landing(slug: str, request: Request, lang: str = "en"):
+    X.ensure_tables()
+    p = db.q1("SELECT * FROM landing_pages WHERE slug=?", (slug,))
+    if not p or p["status"] != "published":
+        raise HTTPException(404)
+    X.record_visit(slug, f"{request.client.host if request.client else ''}|{request.headers.get('user-agent', '')}")
+    return _page_html(p, lang)
+
+
+@app.post("/x/{slug}", response_class=HTMLResponse, include_in_schema=False)
+async def landing_post(slug: str, request: Request, lang: str = "en", handle: str = Form(""), consent: str = Form("")):
+    p = db.q1("SELECT * FROM landing_pages WHERE slug=?", (slug,))
+    if not p or p["status"] != "published":
+        raise HTTPException(404)
+    try:
+        X.customer_signup(slug, handle, "web", consent=bool(consent))
+        msg = "Thank you — you're on the waitlist."
+    except (PermissionError, ValueError) as e:
+        msg = str(e)
+    return _page_html(p, lang, msg)

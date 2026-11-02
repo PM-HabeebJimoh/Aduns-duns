@@ -14,7 +14,7 @@ document.querySelectorAll("#tabs button").forEach((b) => b.addEventListener("cli
 function showTab(name) {
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.id === name));
-  ({ governance: loadGov, opportunities: loadOpps, coverage: loadCoverage, overview: loadOverview, hypotheses: loadHypotheses, signals: loadSignals, capabilities: loadCaps, field: loadField, runs: loadRuns }[name] || (() => {}))();
+  ({ execution: loadExec, governance: loadGov, opportunities: loadOpps, coverage: loadCoverage, overview: loadOverview, hypotheses: loadHypotheses, signals: loadSignals, capabilities: loadCaps, field: loadField, runs: loadRuns }[name] || (() => {}))();
   try { localStorage.setItem("aduns.tab", name); } catch (_) {}
 }
 
@@ -277,4 +277,52 @@ async function openGov(oid) {
     await api(`/api/governance/${oid}/approve`, { method: "POST", body: JSON.stringify({ approver, decision: b.dataset.ap, conditions }) });
     openGov(oid); loadGov();
   }));
+}
+
+
+// ---------------------------------------------------------------- execution
+const EXC = { passed: "ok", failed: "bad", running: "", designed: "muted", inconclusive: "" };
+async function loadExec() {
+  const rows = await api("/api/governance");
+  $("#exList").innerHTML = rows.map((r) => `<div class="item" data-id="${r.opportunity_id}"><div class="t">${esc(r.object)} · ${esc(r.country)}</div>
+    <div class="m">${esc(r.recommendation)} · ${esc(r.status)}</div></div>`).join("") || '<p class="muted">Nothing governed yet.</p>';
+  $("#exList").querySelectorAll(".item").forEach((el) => el.addEventListener("click", () => openExec(+el.dataset.id)));
+}
+async function openExec(oid) {
+  document.querySelectorAll("#exList .item").forEach((el) => el.classList.toggle("sel", +el.dataset.id === oid));
+  const x = await api(`/api/execution/${oid}`);
+  const ops = x.plans.operations || {}, exp = x.plans.expansion || {}, fin = x.finance || {};
+  const lp = x.landing_page;
+  $("#exDetail").innerHTML = `
+    <h2>${esc(x.opportunity.object)} · ${esc(x.opportunity.country)}</h2>
+    <p>${x.approved ? `<span class="chip ev-field_verified">approved by ${esc(x.approved.approver)}</span>` : '<span class="chip ev-claim">not approved — planning only; outward actions locked</span>'}
+       <button id="exRun">Re-plan execution</button></p>
+    <h3>Experiments</h3>
+    <table class="tbl"><thead><tr><th>Test</th><th>Decision rule</th><th>Status</th><th>Result</th><th>How</th></tr></thead><tbody>
+    ${x.experiments.map((e) => `<tr><td><b>${esc(e.title)}</b><br><span class="muted">${esc(e.question)}</span></td><td>${esc(e.decision_rule)}</td>
+      <td class="${EXC[e.status] || ""}"><b>${esc(e.status)}</b></td><td><code>${esc(JSON.stringify(e.result)).slice(0, 160)}</code></td><td class="muted">${esc(e.how)}</td></tr>`).join("")}</tbody></table>
+    ${x.measured_inputs.length ? `<p>Measured inputs feeding Economics: ${x.measured_inputs.map((m) => `<span class="chip ev-field_verified">${esc(m.key)} ${(+m.low).toFixed(3)}–${(+m.high).toFixed(3)}</span>`).join("")}</p>` : ""}
+    <h3>Partners (${x.partners.length})</h3>
+    <table class="tbl"><thead><tr><th>Name</th><th>Role</th><th>Fit</th><th>Public contacts</th><th>Screening</th><th>Stage</th><th>Outreach draft</th></tr></thead><tbody>
+    ${x.partners.map((p) => `<tr><td>${link(p.url, p.name)}</td><td>${esc(p.role)}</td><td>${(+p.fit).toFixed(2)}</td>
+      <td class="muted">${Object.entries(p.contacts || {}).map(([k, v]) => `${esc(k)}: ${v.map((u) => u.includes("@") ? `<a href="mailto:${esc(u)}">${esc(u)}</a>` : link(u, u.slice(0, 40))).join(", ")}`).join("<br>") || "—"}</td>
+      <td class="${(p.screening || []).length ? "bad" : "ok"}">${(p.screening || []).length ? "MATCH" : "clear"}</td><td>${esc(p.stage)}</td>
+      <td><details><summary>${Object.keys(p.outreach || {}).join(", ")}</summary>${Object.entries(p.outreach || {}).map(([l, m]) => `<p><b>${esc(l)}</b><br>${esc(m)}</p>`).join("")}</details></td></tr>`).join("")}</tbody></table>
+    <h3>Operations plan (${esc(ops.route || "")})</h3>
+    <ol>${(ops.workflow || []).map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
+    ${ops.lead_time ? `<p>Lead time from ${esc(ops.lead_time.from)}: ${ops.lead_time.great_circle_km} km, sea ${ops.lead_time.sea_transit_days} d, total ${ops.lead_time.total_lead_time_days.join("–")} d <span class="muted">(${esc(ops.lead_time.kind)})</span></p>` : ""}
+    ${ops.inventory_policy ? `<p>Inventory: weekly demand p50 ${ops.inventory_policy.weekly_demand_units_p50}, reorder point ${ops.inventory_policy.reorder_point_units}, safety stock ${ops.inventory_policy.safety_stock_units} <span class="muted">(${esc(ops.inventory_policy.assumptions)})</span></p>` : ""}
+    <p class="muted">KPIs: ${esc((ops.kpis || []).join(" · "))}</p>
+    <h3>Customer funnel</h3>
+    ${lp ? `<p>Landing page <code>/x/${esc(lp.slug)}</code> — <b>${esc(lp.status)}</b> · ${lp.visits} visits · customers ${esc(JSON.stringify(x.customers))}
+      ${lp.status !== "published" ? `<button id="pubBtn" ${x.approved ? "" : "disabled"}>Publish (requires approval)</button>` : `<a href="/x/${esc(lp.slug)}" target="_blank">open</a>`}</p>
+      <details><summary>Page content (${Object.keys(lp.content).filter((k) => typeof lp.content[k] === "object" && lp.content[k] && lp.content[k].headline).join(", ")})</summary><pre style="white-space:pre-wrap">${esc(JSON.stringify(lp.content, null, 1)).slice(0, 3000)}</pre></details>
+      <p class="muted">SMS/WhatsApp/Telegram: WAIT ${esc(lp.slug)} · ORDER ${esc(lp.slug)} 2 · FEEDBACK ${esc(lp.slug)} text</p>` : ""}
+    <h3>Finance actuals</h3>
+    <p>Revenue ${usd(fin.revenue_usd)} · COGS ${usd(fin.cogs_usd)} · opex ${usd(fin.opex_usd)} · orders ${fin.orders} · gross margin ${pct(fin.gross_margin)} · net margin ${pct(fin.net_margin)} · cash ${usd(fin.cash_position_usd)}</p>
+    <h3>Expansion candidates</h3>
+    <table class="tbl"><thead><tr><th>Country</th><th>Continent</th><th>Same-need signals</th><th>Related hypotheses</th><th>Imports</th><th>Shared language</th><th>Sanctions</th><th>Score</th></tr></thead><tbody>
+    ${(exp.candidates || []).map((c) => `<tr><td>${esc(c.country)}</td><td>${esc(c.continent)}</td><td>${c.same_cluster_signals}</td><td>${c.related_hypotheses}</td><td>${c.imports_usd ? usd(c.imports_usd) + " (" + c.imports_year + ")" : "—"}</td><td>${c.shared_language ? "yes" : ""}</td><td class="bad">${esc(c.sanctions || "")}</td><td>${c.score}</td></tr>`).join("")}</tbody></table>`;
+  $("#exRun").addEventListener("click", async () => { await api("/api/agents/execution", { method: "POST", body: JSON.stringify({ opportunity_id: oid }) }); setTimeout(() => openExec(oid), 8000); });
+  const pb = $("#pubBtn"); if (pb) pb.addEventListener("click", async () => { const actor = prompt("Your name"); if (!actor) return; try { await api(`/api/pages/${lp.slug}/publish`, { method: "POST", body: JSON.stringify({ actor }) }); } catch (e) { alert(e); } openExec(oid); });
 }

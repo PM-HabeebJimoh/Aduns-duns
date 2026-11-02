@@ -118,6 +118,7 @@ class Daemon:
         report["downstream"] = self.downstream()
         report["designed"] = self.design_opportunities()
         report["governed"] = self.govern()
+        report["execution"] = self.execute_plans()
         from . import alerts
         report["alerts"] = len(alerts.check())
         report["translated_backfill"] = self.backfill_translations()
@@ -185,6 +186,26 @@ class Daemon:
             res = GovernanceBoard().run(opportunity_id=r["id"])
             out.append({"opportunity": r["id"], "recommendation": res["stats"].get("recommendation")})
         return out
+
+    def execute_plans(self, per_cycle: int = 1) -> dict:
+        """Layer 4: plan execution for governed opportunities (outward actions stay gated) and evaluate live experiments."""
+        from .agents import execution as X
+        X.ensure_tables()
+        rows = db.q("""SELECT g.opportunity_id id FROM governance_reviews g WHERE g.recommendation != 'reject'
+                       AND g.id IN (SELECT MAX(id) FROM governance_reviews GROUP BY opportunity_id)
+                       AND NOT EXISTS (SELECT 1 FROM execution_plans p WHERE p.opportunity_id=g.opportunity_id
+                                       AND p.updated_at > ?) LIMIT ?""", (time.time() - 3 * 86400, per_cycle))
+        planned = []
+        for r in rows:
+            if self.stopped():
+                break
+            _set("step", f"execution planning for opportunity #{r['id']}")
+            planned.append(X.ExecutionCoordinator().run(opportunity_id=r["id"])["status"])
+        evaluated = 0
+        for e in db.q("SELECT id FROM experiments WHERE status IN ('designed','running','inconclusive')"):
+            X.ExperimentAgent().evaluate(e["id"])
+            evaluated += 1
+        return {"planned": len(planned), "experiments_evaluated": evaluated}
 
     @staticmethod
     def backfill_translations(limit: int = 120) -> int:
