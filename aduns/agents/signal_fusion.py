@@ -32,8 +32,8 @@ TEST_TEMPLATES = {
     "institutional": "Confirm with ≥3 institutional buyers (procurement officers, clinics, cooperatives){where} that '{obj}' requirements went unfilled or under-supplied in the past 12 months; otherwise reject.",
 }
 
-WEIGHTS = {"volume": 0.22, "source_diversity": 0.18, "layer_diversity": 0.10, "intensity": 0.14,
-           "engagement": 0.08, "recency": 0.10, "latent_normalized": 0.10, "geo_focus": 0.08}
+WEIGHTS = {"volume": 0.16, "source_diversity": 0.18, "layer_diversity": 0.10, "need_strength": 0.16,
+           "intensity": 0.10, "engagement": 0.06, "recency": 0.08, "latent_normalized": 0.08, "geo_focus": 0.08}
 
 
 def _parse_date(s: str | None) -> float | None:
@@ -52,13 +52,21 @@ def _parse_date(s: str | None) -> float | None:
 class SignalFusionAgent(Agent):
     name = "signal_fusion"
 
-    def execute(self, query: str = "", domain: str = "", country: str = "", min_need_score: float = 0.35,
-                threshold: float = 0.22, min_cluster_size: int = 2, max_signals: int = 4000,
+    def execute(self, query: str = "", domain: str = "", country: str = "", continent: str = "",
+                min_need_score: float = 0.35, threshold: float = 0.17, min_cluster_size: int = 2,
+                window_days: int | None = None, max_per_partition: int = 3000,
                 allow_structural_singletons: bool = True) -> dict:
-        where, params = ["need_score >= ?"], [min_need_score]
+        """Cluster recent signals (English translations) into hypotheses, partitioned by need domain.
+
+        Partitioning keeps clustering tractable when the 24/7 sweep accumulates tens of thousands of signals
+        while still letting one hypothesis span many countries and continents (global needs)."""
+        from .. import config
+        window = window_days or config.MAX_AGE_DAYS
+        where, params = ["need_score >= ?", "COALESCE(published_ts, retrieved_at) >= ?"], \
+            [min_need_score, time.time() - window * 86400]
         if query:
-            where.append("(query = ? OR text LIKE ?)")
-            params += [query, f"%{query}%"]
+            where.append("(query = ? OR text LIKE ? OR text_en LIKE ?)")
+            params += [query, f"%{query}%", f"%{query}%"]
         if domain:
             where.append("domain = ?")
             params.append(domain)
@@ -66,40 +74,61 @@ class SignalFusionAgent(Agent):
         if iso3:
             where.append("countries LIKE ?")
             params.append(f'%"{iso3}"%')
-        rows = db.q(f"SELECT * FROM signals WHERE {' AND '.join(where)} ORDER BY id DESC LIMIT ?",
-                    (*params, max_signals))
-        self.stats["signals_considered"] = len(rows)
-        if not rows:
-            return {"hypothesis_ids": []}
-
-        docs = []
-        for r in rows:
-            objs = " ".join(db.loads(r["entities"], []))
-            title = r["title"] if r["title"] and r["title"] not in r["text"] else ""
-            # Geography is tracked separately: strip place names so "X in Lagos" and "X in Kano" cluster together.
-            doc = geo.strip_places(f"{title} {r['text']} {objs} {objs}")
-            docs.append(nlp.QUERY_TEMPLATE_WORDS.sub(" ", doc))
-        tf = nlp.TfIdf(docs, min_df=1)
-        M = tf.matrix()
-        sim = nlp.cosine_sim_matrix(M)
-        clusters = nlp.agglomerative(sim, threshold=threshold)
-        self.stats["clusters"] = len(clusters)
-
+        if continent:
+            where.append("continent = ?")
+            params.append(continent)
+        # One clustering space for all needs (a need's words — not our domain label — decide what merges);
+        # very large windows are processed newest-first in slices of max_per_partition.
+        doms = [domain] if domain else [None]
+        full_run = not (query or domain or iso3 or continent)
         hyp_ids: list[int] = []
         self._taken: set[int] = set()
-        for cl in clusters:
-            members = [rows[i] for i in cl]
-            structural_single = (len(cl) == 1 and allow_structural_singletons
-                                 and members[0]["layer"] == "structural" and members[0]["need_score"] >= 0.7)
-            if len(cl) < min_cluster_size and not structural_single:
+        considered: set[int] = set()
+        for dom in doms:
+            dom_sql, dom_p = ("AND domain = ?", (dom,)) if dom else ("", ())
+            rows = db.q(f"SELECT * FROM signals WHERE {' AND '.join(where)} {dom_sql} "
+                        "ORDER BY COALESCE(published_ts, retrieved_at) DESC LIMIT ?", (*params, *dom_p, max_per_partition))
+            if not rows:
                 continue
-            centroid = M[cl].mean(axis=0)
-            hid = self._upsert(members, centroid, tf, [float(centroid @ M[i]) for i in cl])
-            if hid:
-                hyp_ids.append(hid)
-                self._taken.add(hid)
+            self.bump("signals_considered", len(rows))
+            considered |= {r["id"] for r in rows}
+            docs = []
+            for r in rows:
+                objs = " ".join(db.loads(r["entities"], []))
+                body = r.get("text_en") or r["text"]
+                if r["source"] in ("googlenews", "gdelt"):
+                    body = nlp.strip_publisher(body)
+                title = r["title"] if r["title"] and r["title"] not in r["text"] and not r.get("text_en") else ""
+                objs = f"{objs} {objs}"   # the needed object weighs more than incidental words
+                # Geography is tracked separately: strip place names so "X in Lagos" and "X in Kano" cluster together.
+                doc = geo.strip_places(f"{title} {body} {objs} {objs}")
+                docs.append(nlp.QUERY_TEMPLATE_WORDS.sub(" ", doc))
+            tf = nlp.TfIdf(docs, min_df=1)
+            M = tf.matrix()
+            if M.shape[1] == 0:
+                continue
+            clusters = nlp.agglomerative(nlp.cosine_sim_matrix(M), threshold=threshold)
+            self.bump("clusters", len(clusters))
+            for cl in clusters:
+                members = [rows[i] for i in cl]
+                structural_single = (len(cl) == 1 and allow_structural_singletons
+                                     and members[0]["layer"] == "structural" and members[0]["need_score"] >= 0.7)
+                if len(cl) < min_cluster_size and not structural_single:
+                    continue
+                centroid = M[cl].mean(axis=0)
+                hid = self._upsert(members, centroid, tf, [float(centroid @ M[i]) for i in cl])
+                if hid:
+                    hyp_ids.append(hid)
+                    self._taken.add(hid)
         self.stats["hypotheses"] = len(hyp_ids)
-        self._supersede(hyp_ids, {r["id"] for r in rows})
+        self._supersede(hyp_ids, considered)
+        if full_run and hyp_ids:
+            # hypotheses no longer supported by current evidence are retired (field-verified ones are kept)
+            stale = db.q(f"""SELECT id FROM hypotheses WHERE status IN ('open') AND evidence_level != 'field_verified'
+                             AND id NOT IN ({','.join('?' * len(hyp_ids))})""", hyp_ids)
+            for h in stale:
+                db.update("hypotheses", h["id"], {"status": "stale", "updated_at": time.time()})
+            self.stats["retired"] = len(stale)
         return {"hypothesis_ids": hyp_ids}
 
     @staticmethod
@@ -148,13 +177,19 @@ class SignalFusionAgent(Agent):
         recent = 0
         dated = 0
         for m in members:
-            ts = _parse_date(m.get("published_at"))
+            ts = m.get("published_ts") or _parse_date(m.get("published_at"))
             if ts:
                 dated += 1
-                recent += ts > now - 365 * 86400
+                recent += 0.5 ** (max(0.0, now - ts) / (30 * 86400))   # 30-day half-life
         countries = Counter(c for m in members for c in db.loads(m["countries"], []))
-        latent = sum(1 for m in members if {"normalized", "latent_search"} & set(db.loads(m["need_types"], [])))
+        latent = sum(1 for m in members if "normalized" in set(db.loads(m["need_types"], [])))
+        pain_types = {"unmet", "unaffordable", "scarcity", "inefficient", "institutional", "normalized"}
+        strength = float(np.mean([(m.get("need_score") or 0.5) * (1.0 if pain_types & set(db.loads(m["need_types"], []))
+                                                            else 0.5) for m in members]))
         geo_focus = (countries.most_common(1)[0][1] / n) if countries else 0.0
+        # a need that recurs in many countries is a bigger, more replicable market
+        spread = min(1.0, len(countries) / 8)
+        geo_focus = max(geo_focus, spread)
         parts = {
             "volume": min(1.0, math.log1p(n) / math.log1p(40)),
             "source_diversity": min(1.0, len(sources) / 4),
@@ -163,6 +198,7 @@ class SignalFusionAgent(Agent):
             "engagement": float(np.mean([m["engagement"] or 0 for m in members])),
             "recency": (recent / dated) if dated else 0.5,
             "latent_normalized": latent / n,
+            "need_strength": strength,
             "geo_focus": geo_focus,
         }
         total = sum(WEIGHTS[k] * v for k, v in parts.items())
@@ -192,6 +228,9 @@ class SignalFusionAgent(Agent):
         causes = Counter(c for m in members for c in db.loads(m["gap_causes"], []))
         countries = Counter(c for m in members for c in db.loads(m["countries"], []))
         objs = Counter(o for m in members for o in db.loads(m["entities"], []))
+        continents = Counter(m.get("continent") for m in members if m.get("continent"))
+        scope = ("global" if len(continents) >= 3 else "multi-country" if len(countries) >= 2 else
+                 "local" if countries else "unlocated")
         score, breakdown = self.score(members)
         sources = {m["source"].split(":")[0] for m in members}
         layers = {m["layer"] for m in members}
@@ -236,6 +275,7 @@ class SignalFusionAgent(Agent):
             "signal_count": len(members), "source_count": len(sources), "layer_count": len(layers),
             "score": score, "score_breakdown": json.dumps(breakdown), "evidence_level": evidence,
             "tests": json.dumps(tests), "updated_at": time.time(),
+            "continents": json.dumps(dict(continents)), "scope": scope,
         }
         if llm.enabled():
             summ = llm.summarize_hypothesis(terms, [dict(m) for m in members])

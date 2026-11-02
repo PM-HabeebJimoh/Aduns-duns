@@ -265,23 +265,22 @@ def cosine_sim_matrix(m: np.ndarray) -> np.ndarray:
 
 
 def agglomerative(sim: np.ndarray, threshold: float = 0.28) -> list[list[int]]:
-    """Average-linkage agglomerative clustering on a cosine-similarity matrix."""
+    """Average-linkage agglomerative clustering on a cosine-similarity matrix (O(n^2) memory, fast argmax loop)."""
     n = sim.shape[0]
     clusters: list[list[int]] = [[i] for i in range(n)]
     if n <= 1:
         return clusters
-    # cluster-level similarity matrix (average linkage), updated incrementally
-    S = sim.astype(np.float64).copy()
+    S = sim.astype(np.float32).copy()
     np.fill_diagonal(S, -1)
-    sizes = np.ones(n)
+    sizes = np.ones(n, dtype=np.float32)
     alive = np.ones(n, dtype=bool)
     while True:
-        Sm = np.where(alive[:, None] & alive[None, :], S, -1)
-        i, j = np.unravel_index(np.argmax(Sm), Sm.shape)
-        if Sm[i, j] < threshold:
+        flat = int(np.argmax(S))
+        i, j = divmod(flat, n)
+        if S[i, j] < threshold:
             break
-        # merge j into i
         new = (S[i] * sizes[i] + S[j] * sizes[j]) / (sizes[i] + sizes[j])
+        new[~alive] = -1
         S[i, :] = new
         S[:, i] = new
         S[i, i] = -1
@@ -292,3 +291,11 @@ def agglomerative(sim: np.ndarray, threshold: float = 0.28) -> list[list[int]]:
         clusters[i].extend(clusters[j])
         clusters[j] = []
     return [c for c, a in zip(clusters, alive) if a and c]
+
+
+PUBLISHER_SUFFIX = re.compile(r"\s+[-–|]\s+[^-–|]{2,60}$")
+
+
+def strip_publisher(title: str) -> str:
+    """'Milk shortage bites - The Star, Kenya' → 'Milk shortage bites'."""
+    return PUBLISHER_SUFFIX.sub("", title or "").strip()

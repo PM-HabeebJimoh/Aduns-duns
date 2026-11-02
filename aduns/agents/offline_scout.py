@@ -19,7 +19,7 @@ import re
 import secrets
 import time
 
-from .. import config, db, geo, http, nlp, taxonomy
+from .. import config, db, geo, http, nlp, taxonomy, translate
 from ..sources import places
 from .base import Agent
 
@@ -88,15 +88,23 @@ class OfflineScoutCoordinator(Agent):
                     if all(abs(h["lat"] - l["lat"]) > 1e-4 for l in locations):
                         locations.append({**h, "city": city, "venue_query": venue})
         guide = self.interview_guide(hyp, topic)
+        # Field teams work in the local language: translate guide + consent script (Wikimedia MinT, cached).
+        local_lang = next((l for l in c.get("langs", []) if l != "en"), None)
+        consent = CONSENT_SCRIPT.format(topic=topic)
+        if local_lang:
+            for q in guide:
+                q["q_local"] = translate.from_english(q["q"], local_lang)
+                q["lang"] = local_lang
+            consent = consent + "\n\n[" + local_lang + "] " + translate.from_english(consent, local_lang)
         code = f"M{hyp['id']}-{secrets.token_hex(2).upper()}"
         mid = db.insert("scout_missions", {
             "code": code, "hypothesis_id": hyp["id"],
             "title": f"Field validation: {hyp['title']}"[:200],
             "objective": "Confirm or reject the hypothesis with first-hand evidence. Falsification tests: "
                          + " | ".join(db.loads(hyp["tests"], [])),
-            "country": iso3, "locations": json.dumps(locations), "languages": json.dumps(c.get("languages") or []),
+            "country": iso3, "locations": json.dumps(locations), "languages": json.dumps(list(dict.fromkeys((c.get("languages") or []) + c.get("langs", [])))),
             "target_respondents": json.dumps(RESPONDENTS.get(domain, ["local residents", "shop owners"])),
-            "interview_guide": json.dumps(guide), "consent_script": CONSENT_SCRIPT.format(topic=topic),
+            "interview_guide": json.dumps(guide), "consent_script": consent,
             "reward_per_validated": reward_per_validated if reward_per_validated is not None else config.SCOUT_REWARD_VALIDATED,
             "quota": quota, "status": "open", "created_at": time.time(),
         })

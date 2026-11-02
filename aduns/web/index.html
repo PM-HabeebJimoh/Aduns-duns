@@ -11,6 +11,7 @@
   <div class="brand"><span class="logo">◎</span> Aduns <small>Discovery layer</small></div>
   <nav id="tabs">
     <button data-tab="overview" class="active">Overview</button>
+    <button data-tab="coverage">World coverage</button>
     <button data-tab="hypotheses">Hypotheses</button>
     <button data-tab="signals">Signals</button>
     <button data-tab="capabilities">Capabilities</button>
@@ -24,10 +25,10 @@
   <div class="grid2">
     <div class="card">
       <h2>Run discovery</h2>
-      <p class="muted">Senses real public data (news, forums, search demand, shortages, tenders, World Bank), fuses
+      <p class="muted">Sweeps a country's own platforms in its own languages (trends, autocomplete, news, Bluesky, YouTube, Reddit, Telegram, Mastodon, app reviews, market prices, failed tenders) — or searches a focus worldwide — then fuses
         signals into hypotheses, then finds capabilities, cross-border analogies and drafts field missions.</p>
       <form id="discoverForm" class="form">
-        <label>Need / focus <input name="focus" required placeholder="e.g. solar freezer, dialysis, spare parts"></label>
+        <label>Need / focus (optional — leave empty for an open sweep) <input name="focus" placeholder="e.g. insulin, spare parts, water"></label>
         <label>Country (optional) <input name="country" list="countryList" placeholder="e.g. Nigeria"></label>
         <datalist id="countryList"></datalist>
         <div class="row">
@@ -50,6 +51,16 @@
     <h2>Live data sources</h2>
     <table class="tbl" id="sourcesTbl"><thead><tr><th>Source</th><th>OK</th><th>Errors</th><th>Last OK</th><th>Last error</th></tr></thead><tbody></tbody></table>
   </div>
+</section>
+
+<section id="coverage" class="tab">
+  <div class="card">
+    <h2>Autonomous 24/7 discovery</h2>
+    <div id="daemonBox" class="muted">loading…</div>
+    <div class="toolbar"><button id="dStart" class="primary">Start 24/7 loop</button><button id="dStop">Stop</button></div>
+  </div>
+  <div id="contKpis" class="kpis"></div>
+  <div id="contTables"></div>
 </section>
 
 <section id="hypotheses" class="tab">

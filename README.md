@@ -1,65 +1,83 @@
 # Aduns — Global Opportunity-to-Reality Engine
 
-> A system that discovers unmet or poorly served needs anywhere, finds hidden or underused solutions
-> anywhere else (including offline), and builds the most profitable, scalable way to connect them.
+> A system that discovers unmet or poorly served needs anywhere, finds hidden or underused solutions anywhere
+> else (including offline), and builds the most profitable, scalable way to connect them.
 
-This repository is being built layer by layer. **Layer 1, the Discovery agents, is built here.** It runs
-on **real, free, public data only**. Nothing is simulated or synthetic. Field observations exist only
-when a real person submits them.
+**Layer 1, the Discovery agents, is built here.** It is universal: no fixed industry, country or region.
+It runs **24/7** across **every country on every continent, with equal coverage**, and reads each country's
+**own platforms in its own languages**. It uses **free sources only** and **recent data only**: anything
+older than `ADUNS_MAX_AGE_DAYS` (default 90) is rejected.
 
 ```
- Sense ─▶ Detect ─▶ Explain ─▶ Match ─────────────▶ (Layer 2: invent delivery routes, economics …)
-   │         │          │        ├─ Capability map
-   │         │          │        └─ Cross-border analogies
-   └─ offline scouts ◀──┴────────── field missions (validate / falsify)
+     ┌──────────────── 24/7 scheduler: one country per continent per cycle, round-robin ───────────────┐
+     │                                                                                                  │
+ Need Sensing ──▶ translation (MinT) ──▶ Signal Fusion ──▶ Capability Discovery ──▶ Cross-Border Analogy
+ (69 languages,                         (cross-language,     (patents, research,      (ground evidence:
+  25+ platforms)                         cross-country)       open designs, local       solution activity vs
+                                                              apps, OSM providers,      need pressure, every
+                                                              know-how, idle assets)    continent)
+                                                                     │
+                                                         Offline Scout Coordinator ◀──┘
+                                       (missions in the local language, web / SMS / WhatsApp / Telegram intake,
+                                        consent, corroboration, human validation, compensation ledger)
 ```
 
-## The five Discovery agents
+## Where the signals come from (all free; crawled politely where no API exists)
 
-| Agent | What it does | Real data sources |
+| Layer | Per-country sources (local language) | Global sources |
 |---|---|---|
-| **Need Sensing** (`aduns/agents/need_sensing.py`) | Detects unmet, unaffordable, scarce, inefficient, *normalized* ("always takes two days", "only available abroad") and *latent* needs across four layers. It also finds **structural access gaps**: countries that do far worse than their income peers on a World Bank indicator. | GDELT (global news), Google News RSS, Hacker News, Stack Exchange (18 sites), Reddit RSS, Lemmy, Mastodon, Google Autocomplete (search demand by city), openFDA drug shortages, SAM.gov "sources sought", World Bank procurement notices, World Bank WDI |
-| **Signal Fusion** (`signal_fusion.py`) | Clusters weak signals (TF-IDF + average-linkage) into testable hypotheses. Each hypothesis is scored on volume, source diversity, layer diversity, intensity, engagement, recency, latent/normalized share and geographic focus. It explains *why* the gap exists (affordability, distribution, regulation, infrastructure, awareness, trust, capability, supply, finance) and writes **falsification tests**. | all stored signals |
-| **Capability Discovery** (`capability_discovery.py`) | Finds functional equivalents: patents (it flags families **not active** in the target country, whose designs may be free to make there), research, open-source designs, implemented programme models, proven public-sector vendors, clinical interventions and organisations. Results are ranked by relevance and tagged with the delivery routes they suggest. | Google Patents, Crossref, Europe PMC, arXiv, GitHub, World Bank projects, USAspending, ClinicalTrials.gov, Wikidata |
-| **Cross-Border Analogy** (`cross_border_analogy.py`) | **Positive deviance.** Among countries within 2× of the target's GDP per capita (PPP), it finds those with much better outcomes and strong 10-year improvement. It then attaches evidence of *how* they did it: World Bank projects in that country and papers. | World Bank WDI, World Bank projects, Crossref |
-| **Offline Scout Coordinator** (`offline_scout.py`) | Designs field missions with real OSM venues near major cities, official languages, target respondents, a consent script and a non-leading interview guide (normalized-need, analogy and capability probes, plus Van Westendorp pricing questions). It registers scouts only with consent and takes observations from the web, the API, or SMS/WhatsApp (Twilio webhook). Observations are corroborated against other scouts and online signals, then go to human validation and a **compensation ledger**. | OpenStreetMap Nominatim, Wikidata, the people in the field |
+| **Invisible** (latent / normalized) | Google Trends daily rising searches · Google autocomplete in the local language and storefront ("where to buy…", "why is … so expensive", "shortage of…") | |
+| **Scattered** (social) | Bluesky (language-filtered) · YouTube search crawl (uploaded this month) · Reddit country communities · Telegram public channels (auto-discovered) · Mastodon · Lemmy · Google Play reviews of essential-service apps (banking, power, water, health, transport…) | Hacker News · Stack Exchange · CFPB complaints |
+| **Visible** (press) | Google News country edition in the local language (last 30 days) · GDELT local press (translingual) | |
+| **Structural** (measured / institutional) | WFP measured market-price spikes (~90 countries) · World Bank procurement notices · failed and cancelled tenders (Prozorro UA, SECOP CO, SAM.gov US) | GDACS disaster alerts · openFDA drug shortages |
 
-Every record keeps its provenance (source, URL, retrieval time, content hash). Every agent run and
-decision is written to `agent_runs` and `audit_log`. Evidence levels move from
-`claim` (one source) to `corroborated` (two or more independent sources) to `field_verified`
-(two or more validated field observations).
+**Snowball discovery:** every Telegram channel (`t.me/…`) and subreddit (`r/…`) mentioned in collected text is
+added to `source_registry` and crawled on later sweeps. The source map grows by itself.
 
-## Run it
+**Not used:** X/Twitter, Facebook, Instagram, TikTok and WhatsApp groups. They are login-walled, they have no free
+legal access, and their terms forbid crawling. Their content is still reached indirectly through news, YouTube,
+Bluesky, Telegram, and field scouts who can report what they see.
+
+**Official statistics** (World Bank WDI) are not treated as ground truth. They are optional, labelled
+"secondary", and limited to recent years.
+
+## The five agents
+
+| Agent | Universal behaviour |
+|---|---|
+| **Need Sensing** | `sweep_country(iso3)` covers the country's languages (69-language lexicon of shortage, price, unmet, normalized and broken-service cues) across the sources above, in parallel and rate-limited per host. Each candidate is date-checked, need-detected in its own language, translated to English with Wikimedia MinT, geo-tagged, and stored with full provenance. `focused_worldwide(focus)` searches one need across 10 languages. |
+| **Signal Fusion** | Clusters recent signals by domain (22 open domains plus "general"), using English translations so needs merge across languages and borders. Scores volume, source diversity, layer diversity, intensity, engagement, recency (30-day half-life), latent/normalized share and multi-country spread. Assigns a scope of local, multi-country or global. Writes falsification tests. Keeps a stable identity for each hypothesis and supersedes stale ones. |
+| **Capability Discovery** | Searches for functional equivalents: patents (flagging designs not active in the target country), recent research, open hardware and software, programme models, proven vendors, organisations, apps already serving the need in the target country and in reference markets on every continent, mapped local providers (OpenStreetMap), YouTube know-how and skills, and idle or unused assets in the news. |
+| **Cross-Border Analogy** | Samples peer countries from every continent. In each one, in its language and over the last 90 days, it measures solution activity (local news of launches and solutions, local apps) against need pressure (local shortage and price news plus sensed signals). Countries with high solutions and low pressure are returned with their headlines and apps as evidence. |
+| **Offline Scout Coordinator** | Drafts missions with real OSM venues, local languages, an interview guide and consent script translated into the local language, and a compensation amount. Takes reports through the web form, API, SMS/WhatsApp (Twilio) and Telegram bot. Runs consent checks, auto-corroboration and human validation, and records payments in a ledger. |
+
+## Run
 
 ```bash
 pip install -r requirements.txt
-python -m aduns serve                 # dashboard at http://localhost:8000, scout form at /scout, API docs at /docs
-
-# or from the CLI
-python -m aduns discover --focus "solar freezer" --country Nigeria --top 5
-python -m aduns gaps --country NGA              # structural gaps vs income peers, all domains
-python -m aduns analogies --country NGA --domain energy
-python -m aduns show
-python -m pytest -q
+python -m aduns selftest                  # live check of all 31 data sources
+python -m aduns serve --daemon            # dashboard + API at :8000 and the 24/7 worldwide loop
+python -m aduns daemon                    # the loop alone (Ctrl-C or touch data/STOP to stop)
+python -m aduns sweep --country Kenya     # one country, its own languages
+python -m aduns discover --focus insulin  # one need, worldwide
+python -m aduns coverage                  # signals per continent
+docker compose up -d                      # always-on deployment (see also deploy/aduns.service)
 ```
 
-Optional environment variables (the system works without any of them):
+Dashboard tabs: **World coverage** (every continent and country: signals, sources working or failing, last sweep,
+daemon status with start/stop), Hypotheses, Signals (original text plus English), Capabilities, Field network,
+and Runs & audit.
 
-| Variable | Effect |
+| Env var | Effect |
 |---|---|
-| `ADUNS_CONTACT_EMAIL` | Sent to polite-pool APIs (Crossref, Nominatim) |
-| `GITHUB_TOKEN`, `STACKEXCHANGE_KEY` | Higher rate limits |
-| `ANTHROPIC_API_KEY` | Turns on optional Claude synthesis of hypotheses. It is stored separately from the evidence and is told to use only that evidence. |
-| `ADUNS_DB` | SQLite path (default `data/aduns.db`) |
-| `ADUNS_SCOUT_REWARD_SUBMITTED` / `_VALIDATED` | Scout compensation |
-
-### SMS / WhatsApp field intake
-Point a Twilio number (SMS or WhatsApp) to `POST /webhooks/sms`. The commands are:
-`JOIN name | role | country | town`, `MISSIONS`, `OBS <code> <text>`,
-`PRICE <code> <amount> <CUR> <item> @ <place>`, and `STOP`.
+| `ADUNS_MAX_AGE_DAYS` | Recency window (default 90) |
+| `ADUNS_CONTACT_EMAIL` | Polite-pool identification; raises the MyMemory fallback translation quota |
+| `ADUNS_TELEGRAM_TOKEN` | Enables Telegram bot replies for scouts (`/webhooks/telegram`) |
+| `GITHUB_TOKEN`, `STACKEXCHANGE_KEY` | Higher rate limits (optional) |
+| `ANTHROPIC_API_KEY` | Optional Claude synthesis of hypotheses from their evidence |
 
 ## Roadmap (next layers)
-2. **Opportunity design.** Solution Composition, Localization, Delivery-Route (14 routes), Economics (net margin after customer acquisition, field operations, fraud, tax and financing), Market Structure, Defensibility.
-3. **Execution.** Experiment, Partnership, Operations, Customer, Finance, Expansion.
-4. **Governance.** Verification, Legal & Safety, Red-Team, Impact, Audit. The provenance and audit tables they need already exist.
-5. **Learning loop.** Real outcomes feed back into scoring.
+2. Opportunity design: solution composition, localization, delivery routes, economics, market structure, defensibility.
+3. Governance: verification, legal & safety, red team, impact, audit.
+4. Execution: experiments, partnerships, operations, customers, finance, expansion.
+5. Learning from real outcomes.

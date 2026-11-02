@@ -26,6 +26,34 @@ _Q_META = """SELECT ?iso3 (GROUP_CONCAT(DISTINCT ?dem; separator="|") AS ?dems)
  OPTIONAL{?c wdt:P37 ?lang. ?lang rdfs:label ?langLabel FILTER(lang(?langLabel)="en")}
 } GROUP BY ?iso3"""
 
+_Q_LANGCONT = """SELECT ?iso3 (GROUP_CONCAT(DISTINCT ?code; separator="|") AS ?codes)
+ (GROUP_CONCAT(DISTINCT ?cont; separator="|") AS ?conts) WHERE {
+ ?c wdt:P298 ?iso3. ?c wdt:P31/wdt:P279* wd:Q6256.
+ OPTIONAL { ?c wdt:P37 ?lang. ?lang wdt:P218 ?code. }
+ OPTIONAL { ?c wdt:P30 ?cont. }
+} GROUP BY ?iso3"""
+
+CONTINENT_QID = {"Q15": "Africa", "Q48": "Asia", "Q46": "Europe", "Q49": "North America", "Q18": "South America",
+                 "Q538": "Oceania", "Q55643": "Oceania", "Q27611": "North America", "Q828": "North America"}
+CONTINENTS = ["Africa", "Asia", "Europe", "North America", "South America", "Oceania"]
+SOUTH_AMERICA = {"ARG", "BOL", "BRA", "CHL", "COL", "ECU", "GUY", "PRY", "PER", "SUR", "URY", "VEN"}
+OCEANIA = {"AUS", "NZL", "PNG", "FJI", "SLB", "VUT", "WSM", "TON", "KIR", "TUV", "NRU", "FSM", "MHL", "PLW",
+           "PYF", "NCL", "GUM", "ASM", "MNP"}
+
+# Widely used languages beyond the official ones (what people actually post in).
+SPOKEN = {
+    "NGA": ["en", "ha", "yo", "ig"], "IND": ["hi", "en", "bn", "ta"], "PAK": ["ur", "en"], "BGD": ["bn"],
+    "KEN": ["en", "sw"], "TZA": ["sw", "en"], "UGA": ["en", "sw"], "ETH": ["am", "en"], "SOM": ["so", "ar"],
+    "ZAF": ["en", "af", "zu"], "GHA": ["en"], "EGY": ["ar"], "MAR": ["ar", "fr"], "DZA": ["ar", "fr"], "TUN": ["ar", "fr"],
+    "SEN": ["fr"], "CIV": ["fr"], "CMR": ["fr", "en"], "COD": ["fr", "sw"], "PHL": ["en", "tl"], "IDN": ["id"],
+    "MYS": ["ms", "en"], "SGP": ["en", "zh", "ms"], "VNM": ["vi"], "THA": ["th"], "MMR": ["my"], "KHM": ["km"],
+    "CHN": ["zh"], "TWN": ["zh"], "HKG": ["zh", "en"], "JPN": ["ja"], "KOR": ["ko"], "IRN": ["fa"], "AFG": ["fa"],
+    "ISR": ["he", "ar"], "TUR": ["tr"], "RUS": ["ru"], "UKR": ["uk", "ru"], "KAZ": ["kk", "ru"], "UZB": ["uz", "ru"],
+    "KGZ": ["ru"], "TJK": ["ru"], "BLR": ["ru"], "TKM": ["tk", "ru"], "MLI": ["fr"], "BTN": ["en"], "GRL": ["da"],
+    "MDV": ["dv", "en"], "LAO": ["lo"], "MNG": ["mn"], "BOL": ["es"], "PER": ["es"], "PRY": ["es"], "ECU": ["es"], "NPL": ["ne"], "LKA": ["en", "ta"], "BRA": ["pt"], "PRT": ["pt"],
+    "AGO": ["pt"], "MOZ": ["pt"], "USA": ["en", "es"], "CAN": ["en", "fr"], "MEX": ["es"], "HTI": ["fr"],
+}
+
 _Q_CITIES = """SELECT ?iso3 ?cityLabel ?pop ?lat ?lon WHERE {
  ?city wdt:P1082 ?pop. FILTER(?pop > 1000000)
  ?city wdt:P31/wdt:P279? wd:Q515; wdt:P17 ?c. ?c wdt:P298 ?iso3.
@@ -65,6 +93,8 @@ def countries() -> dict[str, dict]:
                 "demonyms": [],
                 "languages": [],
                 "cities": [],
+                "lang_codes": [],
+                "wd_continents": [],
             }
         try:
             for r in _sparql(_Q_META):
@@ -72,6 +102,15 @@ def countries() -> dict[str, dict]:
                 if rec:
                     rec["demonyms"] = [d for d in r.get("dems", "").split("|") if d]
                     rec["languages"] = [l for l in r.get("langs", "").split("|") if l]
+            try:
+                for r in _sparql(_Q_LANGCONT):
+                    rec = out.get(r["iso3"])
+                    if not rec:
+                        continue
+                    rec["lang_codes"] = [c for c in r.get("codes", "").split("|") if c]
+                    rec["wd_continents"] = [CONTINENT_QID.get(u.rsplit("/", 1)[-1]) for u in r.get("conts", "").split("|") if u]
+            except http.FetchError:
+                pass
             seen = set()
             for r in _sparql(_Q_CITIES):
                 rec = out.get(r["iso3"])
@@ -91,7 +130,42 @@ def countries() -> dict[str, dict]:
                 rec["cities"].sort(key=lambda c: -c["population"])
         except http.FetchError:
             pass  # gazetteer still works with World Bank names only
+        for iso, rec in out.items():
+            rec["continent"] = _continent(iso, rec)
+            langs = list(dict.fromkeys(SPOKEN.get(iso, []) + rec.get("lang_codes", [])))
+            if not langs:
+                langs = ["en"]
+            rec["langs"] = langs
         return out
+
+
+def _continent(iso: str, rec: dict) -> str:
+    if iso in SOUTH_AMERICA:
+        return "South America"
+    if iso in OCEANIA:
+        return "Oceania"
+    region = rec["region"]
+    if region == "Sub-Saharan Africa":
+        return "Africa"
+    if region == "North America" or region.startswith("Latin America"):
+        return "North America"
+    if region == "South Asia":
+        return "Asia"
+    if region.startswith("Middle East"):
+        return "Africa" if iso in {"DZA", "EGY", "LBY", "MAR", "TUN", "DJI"} else "Asia"
+    wd = [c for c in rec.get("wd_continents", []) if c]
+    if region.startswith("Europe"):
+        return "Asia" if wd == ["Asia"] or iso in {"KAZ", "KGZ", "TJK", "TKM", "UZB"} else "Europe"
+    if region.startswith("East Asia"):
+        return "Oceania" if "Oceania" in wd else "Asia"
+    return wd[0] if wd else "Asia"
+
+
+def by_continent() -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {c: [] for c in CONTINENTS}
+    for iso, rec in countries().items():
+        out.setdefault(rec["continent"], []).append(iso)
+    return out
 
 
 _SHORT_NAMES = {

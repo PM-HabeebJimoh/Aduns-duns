@@ -23,8 +23,13 @@ ANTHROPIC_MODEL = os.environ.get("ADUNS_LLM_MODEL", "claude-opus-5-5")
 LLM_ENABLED = bool(os.environ.get("ANTHROPIC_API_KEY")) and os.environ.get("ADUNS_LLM", "1") != "0"
 
 HTTP_TIMEOUT = float(os.environ.get("ADUNS_HTTP_TIMEOUT", "25"))
-CACHE_TTL_SECONDS = int(os.environ.get("ADUNS_CACHE_TTL", str(6 * 3600)))
+CACHE_TTL_SECONDS = int(os.environ.get("ADUNS_CACHE_TTL", str(3 * 3600)))
 
 # Field-network compensation defaults (USD-equivalent, paid only for validated observations).
 SCOUT_REWARD_SUBMITTED = float(os.environ.get("ADUNS_SCOUT_REWARD_SUBMITTED", "0.5"))
 SCOUT_REWARD_VALIDATED = float(os.environ.get("ADUNS_SCOUT_REWARD_VALIDATED", "3.0"))
+
+# Recency: only signals published within this window are accepted (no stale data).
+MAX_AGE_DAYS = int(os.environ.get("ADUNS_MAX_AGE_DAYS", "90"))
+# Scheduler pacing
+SWEEP_PAUSE_SECONDS = float(os.environ.get("ADUNS_SWEEP_PAUSE", "5"))

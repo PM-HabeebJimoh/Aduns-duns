@@ -1,0 +1,11 @@
+services:
+  aduns:
+    build: .
+    restart: unless-stopped
+    ports: ["8000:8000"]
+    volumes: ["./data:/data"]
+    environment:
+      ADUNS_CONTACT_EMAIL: ${ADUNS_CONTACT_EMAIL:-}
+      ADUNS_MAX_AGE_DAYS: ${ADUNS_MAX_AGE_DAYS:-90}
+      ADUNS_TELEGRAM_TOKEN: ${ADUNS_TELEGRAM_TOKEN:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}

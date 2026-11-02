@@ -102,7 +102,7 @@ def audit(limit: int = 100):
 
 # ----------------------------------------------------------------- runs
 class DiscoverReq(BaseModel):
-    focus: str = Field(..., min_length=2)
+    focus: str = ""
     country: str = ""
     depth: int = Field(1, ge=1, le=3)
     top_n: int = Field(5, ge=1, le=20)
@@ -119,6 +119,7 @@ def discover(req: DiscoverReq):
 class SenseReq(BaseModel):
     focus: str = ""
     country: str = ""
+    include_global: bool = False
     depth: int = 1
     sources: Optional[list[str]] = None
 
@@ -208,7 +209,7 @@ def _hyp(r: dict) -> dict:
 def hypotheses(domain: str = "", status: str = "", min_signals: int = 1, limit: int = 100):
     where, params = ["signal_count >= ?"], [min_signals]
     if status != "all":
-        where.append("status != 'superseded'")
+        where.append("status NOT IN ('superseded', 'stale')")
     if domain:
         where.append("domain = ?"); params.append(domain)
     if status and status != "all":
@@ -387,3 +388,65 @@ async def sms_webhook(request: Request, From: str = Form(""), Body: str = Form("
     reply = OfflineScoutCoordinator().handle_message(sender, Body, channel=channel)
     return Response(f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{escape(reply)}</Message></Response>',
                     media_type="application/xml")
+
+
+@app.post("/webhooks/telegram")
+async def telegram_webhook(request: Request):
+    """Telegram Bot API webhook (free). Set with:
+    https://api.telegram.org/bot<TOKEN>/setWebhook?url=<public-url>/webhooks/telegram
+    Replies are sent back through the Bot API when ADUNS_TELEGRAM_TOKEN is configured."""
+    import os
+    import requests as _rq
+    upd = await request.json()
+    msg = upd.get("message") or upd.get("edited_message") or {}
+    chat = (msg.get("chat") or {}).get("id")
+    text = msg.get("text") or ""
+    if not chat:
+        return {"ok": True}
+    sender = f"tg:{(msg.get('from') or {}).get('id', chat)}"
+    reply = OfflineScoutCoordinator().handle_message(sender, text.lstrip("/"), channel="telegram")
+    token = os.environ.get("ADUNS_TELEGRAM_TOKEN")
+    if token:
+        try:
+            _rq.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat, "text": reply}, timeout=15)
+        except _rq.RequestException:
+            pass
+    return {"ok": True, "reply": reply}
+
+
+# ----------------------------------------------------------------- 24/7 daemon & coverage
+from . import scheduler  # noqa: E402
+
+
+@app.on_event("startup")
+def _autostart():
+    import os
+    if os.environ.get("ADUNS_AUTOSTART_DAEMON") == "1":
+        scheduler.start_background()
+
+
+@app.get("/api/coverage")
+def api_coverage():
+    return scheduler.coverage()
+
+
+@app.get("/api/daemon")
+def api_daemon():
+    t = scheduler._bg.get("thread")
+    return {"running_in_this_process": bool(t and t.is_alive()), "state": scheduler.state()}
+
+
+@app.post("/api/daemon/start")
+def api_daemon_start(parallel_countries: int = 2, downstream_per_cycle: int = 3):
+    return {"started": scheduler.start_background(parallel_countries=parallel_countries,
+                                                  downstream_per_cycle=downstream_per_cycle)}
+
+
+@app.post("/api/daemon/stop")
+def api_daemon_stop():
+    return {"stopping": scheduler.stop_background()}
+
+
+@app.get("/api/sources/registry")
+def api_registry():
+    return db.q("SELECT * FROM source_registry ORDER BY discovered_at DESC LIMIT 500")

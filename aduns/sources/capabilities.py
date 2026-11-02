@@ -67,7 +67,7 @@ def google_patents(query: str, limit: int = 15) -> list[dict]:
 def crossref(query: str, limit: int = 15) -> list[dict]:
     params = {"query": query, "rows": min(limit, 50),
               "select": "DOI,title,published,container-title,abstract,URL,author,type,is-referenced-by-count",
-              "filter": "type:journal-article"}
+              "filter": "type:journal-article,from-pub-date:" + str(__import__("datetime").date.today().year - 6)}
     if config.CONTACT_EMAIL:
         params["mailto"] = config.CONTACT_EMAIL
     data = http.fetch("https://api.crossref.org/works", params, source="crossref", ttl=_TTL)
@@ -279,3 +279,79 @@ CAPABILITY_SOURCES = {
     "clinicaltrials": clinical_trials,
     "wikidata": wikidata_orgs,
 }
+
+
+# ================================================================ local supply evidence
+def _social():
+    from . import social
+    return social
+
+
+def local_apps(query: str, iso2: str, limit: int = 5) -> list[dict]:
+    """Digital solutions already serving this need inside a given country (Google Play, country storefront)."""
+    S = _social()
+    out = []
+    for app_id in S.play_search(query, iso2, "en", limit):
+        body = http.fetch("https://play.google.com/store/apps/details", {"id": app_id, "hl": "en", "gl": iso2.upper()},
+                          source="googleplay", ttl=24 * 3600, expect="text", headers={"User-Agent": S.BROWSER_UA})
+        import html as _h
+        import re as _re
+        t = _re.search(r'<meta property="og:title" content="([^"]+)"', body)
+        d = _re.search(r'<meta (?:property="og:description"|name="description") content="([^"]+)"', body)
+        dev = _re.search(r'<div class="Vbfug auoIOc"><a[^>]*><span>([^<]+)</span>', body)
+        inst = _re.search(r'<div class="ClM7O">([^<]+)</div><div class="g1rdde">Downloads</div>', body)
+        title = _h.unescape(t.group(1)).replace(" - Apps on Google Play", "") if t else app_id
+        out.append({
+            "source": "googleplay", "capability_type": "local_digital_solution", "external_id": f"{app_id}:{iso2}",
+            "url": f"https://play.google.com/store/apps/details?id={app_id}&gl={iso2}", "title": title,
+            "description": _h.unescape(d.group(1)) if d else "", "holder": _h.unescape(dev.group(1)) if dev else None,
+            "countries": [iso2], "year": None, "maturity": 0.6,
+            "transferability": ["software_layer", "enable_existing_operator", "local_distribution_partnership"],
+            "extra": {"installs": inst.group(1) if inst else None, "app_id": app_id, "available_in": iso2},
+        })
+    return out
+
+
+def youtube_knowhow(query: str, iso2: str = "US", lang: str = "en", limit: int = 8) -> list[dict]:
+    """Practical know-how / skills: recent 'how to make / repair / build' videos (people who can teach it)."""
+    S = _social()
+    out = []
+    for v in S.youtube_search(f"how to make {query}", iso2, lang, limit) + S.youtube_search(f"{query} repair", iso2, lang, 4):
+        out.append({"source": "youtube", "capability_type": "skill_knowhow", "external_id": v["external_id"],
+                    "url": v["url"], "title": v["title"], "description": v["text"], "holder": v["author"],
+                    "countries": [], "year": None, "maturity": min(0.6, 0.2 + v["engagement"]),
+                    "transferability": ["expert_transfer", "manufacture_locally"],
+                    "extra": {"views": v["extra"].get("views"), "published": v["published_at"]}})
+    return out
+
+
+def idle_assets(query: str, limit: int = 15) -> list[dict]:
+    """Unused / idle / underutilised assets reported in the last 90 days (spare capacity to re-purpose)."""
+    S = _social()
+    q = f'"{query}" (idle OR unused OR abandoned OR underutilized OR "spare capacity" OR "excess capacity" OR surplus)'
+    out = []
+    for n in S.google_news(q.replace(" when:30d", ""), "US", "en", limit):
+        out.append({"source": "googlenews", "capability_type": "unused_asset", "external_id": n["external_id"],
+                    "url": n["url"], "title": n["title"], "description": n["text"], "holder": n["author"],
+                    "countries": [], "year": None, "maturity": 0.4,
+                    "transferability": ["use_idle_capacity", "enable_existing_operator", "cooperative_model"],
+                    "extra": {"published": n["published_at"]}})
+    return out
+
+
+def osm_providers(query: str, iso2: str, cities: list[str], limit: int = 5) -> list[dict]:
+    """Physical providers mapped on OpenStreetMap in the country's major cities (local suppliers / partners)."""
+    from . import places
+    out = []
+    for city in cities[:3]:
+        for p in places.geocode(f"{query} {city}", iso2, limit):
+            if p.get("category") in ("boundary", "place", "highway", "landuse"):
+                continue
+            out.append({"source": "openstreetmap", "capability_type": "local_provider", "external_id": p["osm_url"],
+                        "url": p["osm_url"], "title": p["name"].split(",")[0], "description": p["name"],
+                        "holder": p["name"].split(",")[0], "countries": [iso2], "year": None, "maturity": 0.5,
+                        "transferability": ["local_distribution_partnership", "enable_existing_operator",
+                                            "demand_aggregation"],
+                        "extra": {"lat": p["lat"], "lon": p["lon"], "category": p.get("category"), "type": p.get("type"),
+                                  "city": city}})
+    return out

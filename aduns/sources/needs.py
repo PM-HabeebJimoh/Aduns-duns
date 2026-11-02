@@ -30,7 +30,7 @@ def _iso(ts: float | int | None) -> str | None:
 
 def _eng(*counts: float) -> float:
     """Log-scaled engagement in 0..1 (≈1 at ~1000 interactions)."""
-    total = sum(c or 0 for c in counts)
+    total = max(0, sum(c or 0 for c in counts))
     return round(min(1.0, math.log1p(total) / math.log1p(1000)), 3)
 
 

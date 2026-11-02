@@ -14,7 +14,7 @@ document.querySelectorAll("#tabs button").forEach((b) => b.addEventListener("cli
 function showTab(name) {
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.id === name));
-  ({ overview: loadOverview, hypotheses: loadHypotheses, signals: loadSignals, capabilities: loadCaps, field: loadField, runs: loadRuns }[name] || (() => {}))();
+  ({ coverage: loadCoverage, overview: loadOverview, hypotheses: loadHypotheses, signals: loadSignals, capabilities: loadCaps, field: loadField, runs: loadRuns }[name] || (() => {}))();
   try { localStorage.setItem("aduns.tab", name); } catch (_) {}
 }
 
@@ -48,6 +48,24 @@ async function pollJob(id) {
   if (j.status === "running") setTimeout(() => pollJob(id), 2500); else loadOverview();
 }
 
+// ---------------------------------------------------------------- coverage
+async function loadCoverage() {
+  const [cov, d] = await Promise.all([api("/api/coverage"), api("/api/daemon")]);
+  const st = d.state || {}; const v = (k) => (st[k] || {}).value;
+  const lc = v("last_cycle") || {};
+  $("#daemonBox").innerHTML = `Status: <b>${esc(v("status") || "never started")}</b> ${d.running_in_this_process ? "(running in this server)" : ""} ·
+    cycle ${esc(v("cycle") ?? "—")} · heartbeat ${ago(v("heartbeat"))} · now: ${esc(v("step") || "—")}<br>
+    Last cycle swept: ${esc((lc.countries || []).join(", ") || "—")} · fusion: ${esc(JSON.stringify(lc.fusion || {}))}
+    ${v("last_error") ? `<div class="bad">Last error: ${esc(String(v("last_error")).slice(0, 300))}</div>` : ""}`;
+  $("#contKpis").innerHTML = Object.entries(cov).map(([c, x]) => `<div class="kpi"><b>${x.signals.toLocaleString()}</b><span>${esc(c)} · ${x.swept}/${x.countries} countries swept</span></div>`).join("");
+  $("#contTables").innerHTML = Object.entries(cov).map(([c, x]) => `<div class="card"><h2>${esc(c)}</h2>
+    <table class="tbl"><thead><tr><th>Country</th><th>Signals (recent)</th><th>Sources</th><th>Hypotheses</th><th>Last sweep</th><th>Working sources</th><th>Failed</th></tr></thead><tbody>
+    ${x.rows.map((r) => `<tr><td>${esc(r.name)}</td><td>${r.signals}</td><td>${r.sources}</td><td>${r.hypotheses}</td><td>${ago(r.last_sweep)}</td><td class="muted">${esc((r.sources_ok || []).join(", "))}</td><td class="bad">${esc((r.sources_failed || []).join(", "))}</td></tr>`).join("")}
+    </tbody></table></div>`).join("");
+}
+$("#dStart").addEventListener("click", async () => { await api("/api/daemon/start", { method: "POST" }); setTimeout(loadCoverage, 1500); });
+$("#dStop").addEventListener("click", async () => { await api("/api/daemon/stop", { method: "POST" }); setTimeout(loadCoverage, 1500); });
+
 // ---------------------------------------------------------------- hypotheses
 $("#hypDomain").addEventListener("change", loadHypotheses);
 $("#hypMin").addEventListener("change", loadHypotheses);
@@ -56,7 +74,7 @@ async function loadHypotheses() {
   const rows = await api(`/api/hypotheses?domain=${encodeURIComponent($("#hypDomain").value)}&min_signals=${$("#hypMin").value || 1}`);
   $("#hypList").innerHTML = rows.map((h) => `<div class="item" data-id="${h.id}"><div class="t">${esc(h.title)}</div>
     <div class="m"><span class="score">${h.score.toFixed(2)}</span> · ${h.signal_count} signals · ${h.source_count} sources · ${h.layer_count} layers
-    <span class="chip ev-${h.evidence_level}">${h.evidence_level.replace("_", " ")}</span> <span class="chip">${esc(h.domain || "—")}</span> <span class="chip">${esc(h.status)}</span></div></div>`).join("")
+    <span class="chip ev-${h.evidence_level}">${h.evidence_level.replace("_", " ")}</span> <span class="chip">${esc(h.domain || "—")}</span> <span class="chip">${esc(h.scope || "")}</span> <span class="chip">${esc(h.status)}</span></div></div>`).join("")
     || '<p class="muted">No hypotheses yet.</p>';
   $("#hypList").querySelectorAll(".item").forEach((el) => el.addEventListener("click", () => openHyp(+el.dataset.id)));
 }
@@ -71,19 +89,19 @@ async function openHyp(id) {
     <div><span class="score">score ${h.score.toFixed(3)}</span> <span class="chip ev-${h.evidence_level}">${h.evidence_level}</span></div>
     <h3>Score breakdown</h3>${kv(Object.fromEntries(Object.entries(h.score_breakdown || {}).map(([k, v]) => [k, +v.toFixed(2)])))}
     <h3>Key terms</h3>${(h.key_terms || []).map((t) => `<span class="chip">${esc(t)}</span>`).join("")}
-    <h3>Geography</h3>${kv(h.countries) || '<span class="muted">none detected</span>'}
+    <h3>Geography</h3>${kv(h.countries) || '<span class="muted">none detected</span>'} ${kv(h.continents)}
     <h3>Need types · Gap causes (why the gap exists)</h3>${kv(h.need_types)} ${kv(h.gap_causes)}
     <h3>Falsification tests</h3><ol class="guide">${(h.tests || []).map((t) => `<li>${esc(t)}</li>`).join("")}</ol>
     <div class="toolbar"><button data-act="cap">Find capabilities</button><button data-act="ana">Find cross-border analogies</button><button data-act="mis">Draft field mission</button><span id="actMsg" class="muted"></span></div>
     <h3>Evidence (${h.signals.length} real signals)</h3>
-    ${h.signals.slice(0, 60).map((s) => `<div class="sig layer-${esc(s.layer)}"><div>${esc(s.text.slice(0, 380))}</div>
+    ${h.signals.slice(0, 60).map((s) => `<div class="sig layer-${esc(s.layer)}"><div>${esc(s.text.slice(0, 380))}</div>${s.text_en && s.text_en !== s.text ? `<div class="muted">EN: ${esc(s.text_en.slice(0, 260))}</div>` : ""}
       <div class="src">${esc(s.layer)} · ${link(s.url, s.source)} · ${esc((s.published_at || "").slice(0, 10))} · need ${s.need_score} ${(s.need_types || []).map((t) => `<span class="chip">${esc(t)}</span>`).join("")}</div></div>`).join("")}
     <h3>Capabilities (${h.capabilities.length})</h3>
     ${h.capabilities.slice(0, 40).map((c) => `<div class="cap"><span class="chip">${esc(c.capability_type)}</span> ${link(c.url, c.title)} <span class="muted">${esc(c.holder || "")} ${c.year || ""}</span>
       <div class="muted">${esc((c.description || "").slice(0, 260))}</div><div class="muted">relevance ${(+c.relevance).toFixed(2)} · ${esc(c.rationale)}</div></div>`).join("") || '<p class="muted">None yet.</p>'}
     <h3>Cross-border analogies (${h.analogies.length})</h3>
-    <table class="tbl"><thead><tr><th>Analog</th><th>Indicator</th><th>Target</th><th>Analog</th><th>10y Δ</th><th>Income sim.</th><th>Score</th><th>How they did it</th></tr></thead><tbody>
-    ${h.analogies.map((a) => `<tr><td>${esc(a.analog_name)}</td><td>${esc(a.indicator_name)}</td><td>${(+a.target_value).toFixed(1)} (${a.target_year})</td><td>${(+a.analog_value).toFixed(1)} (${a.analog_year})</td><td>${a.analog_change_10y == null ? "—" : (+a.analog_change_10y).toFixed(1)}</td><td>${(+a.income_similarity).toFixed(2)}</td><td>${(+a.deviance_score).toFixed(2)}</td><td>${(a.evidence || []).map((e) => link(e.url, e.title)).join("<br>")}</td></tr>`).join("")}</tbody></table>
+    <table class="tbl"><thead><tr><th>Analog</th><th>Measure</th><th>Target pressure</th><th>Analog pressure</th><th>Method</th><th>Same income</th><th>Score</th><th>How they did it (evidence)</th></tr></thead><tbody>
+    ${h.analogies.map((a) => `<tr><td>${esc(a.analog_name)}</td><td>${esc(a.indicator_name)}</td><td>${(+a.target_value).toFixed(2)}</td><td>${(+a.analog_value).toFixed(2)}</td><td>${esc(a.method || "")}</td><td>${(+a.income_similarity).toFixed(2)}</td><td>${(+a.deviance_score).toFixed(2)}</td><td>${(a.evidence || []).map((e) => link(e.url, e.title)).join("<br>")}</td></tr>`).join("")}</tbody></table>
     <h3>Field missions</h3>${h.missions.map(missionHtml).join("") || '<p class="muted">None yet.</p>'}`;
   $("#hypDetail").querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", async () => {
     const act = b.dataset.act; $("#actMsg").textContent = "running…";
@@ -111,7 +129,7 @@ $("#sigGo").addEventListener("click", loadSignals);
 async function loadSignals() {
   const p = new URLSearchParams({ q: $("#sigQ").value, layer: $("#sigLayer").value, source: $("#sigSource").value, country: $("#sigCountry").value, limit: 200 });
   const rows = await api(`/api/signals?${p}`);
-  $("#sigList").innerHTML = rows.map((s) => `<div class="sig layer-${esc(s.layer)}"><div>${esc(s.text.slice(0, 420))}</div>
+  $("#sigList").innerHTML = rows.map((s) => `<div class="sig layer-${esc(s.layer)}"><div>${esc(s.text.slice(0, 420))}</div>${s.text_en && s.text_en !== s.text ? `<div class="muted">EN: ${esc(s.text_en.slice(0, 300))}</div>` : ""}
     <div class="src">${esc(s.layer)} · ${link(s.url, s.source)} · ${esc((s.published_at || "").slice(0, 10))} · need ${s.need_score} · intensity ${s.intensity}
     ${(s.need_types || []).map((t) => `<span class="chip">${esc(t)}</span>`).join("")} ${(s.countries || []).map((c) => `<span class="chip">${esc(c)}</span>`).join("")}</div></div>`).join("") || '<p class="muted">No signals.</p>';
 }

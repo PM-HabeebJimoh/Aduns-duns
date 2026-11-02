@@ -105,6 +105,36 @@ DOMAINS: dict[str, dict] = {
     },
 }
 
+# Universal coverage: additional need domains (no official indicators — sensed from ground signals only).
+DOMAINS.update({
+    "food": {"keywords": ["food", "bread", "rice", "flour", "sugar", "cooking oil", "maize", "beans", "milk", "meat",
+                          "vegetable", "food price", "hunger", "groceries", "baby formula", "eggs", "onion", "tomato"],
+             "indicators": [], "capability_sources": ["papers", "github", "patents", "worldbank_projects"]},
+    "fuel": {"keywords": ["fuel", "petrol", "gasoline", "diesel", "kerosene", "cooking gas", "lpg", "filling station",
+                          "fuel queue", "gas cylinder", "cng"],
+             "indicators": [], "capability_sources": ["patents", "papers", "github", "wikidata"]},
+    "mobility": {"keywords": ["bus", "taxi", "train", "commute", "traffic", "transport fare", "ride", "metro", "ferry",
+                              "motorbike", "public transport", "parking", "visa", "flight", "airline"],
+                 "indicators": [], "capability_sources": ["github", "papers", "worldbank_projects"]},
+    "jobs_income": {"keywords": ["job", "jobs", "unemployment", "salary", "wage", "hiring", "workers", "labour shortage",
+                                 "labor shortage", "skilled workers", "freelance", "pension"],
+                    "indicators": [], "capability_sources": ["github", "papers", "worldbank_projects"]},
+    "public_services": {"keywords": ["passport", "id card", "birth certificate", "government office", "permit", "court",
+                                     "police", "registry", "public service", "tax office", "license renewal", "garbage",
+                                     "waste collection", "street light"],
+                        "indicators": [], "capability_sources": ["github", "papers", "worldbank_projects"]},
+    "safety_security": {"keywords": ["crime", "theft", "robbery", "kidnapping", "security", "fraud", "scam", "violence"],
+                        "indicators": [], "capability_sources": ["github", "papers"]},
+    "disaster_climate": {"keywords": ["flood", "drought", "earthquake", "cyclone", "heatwave", "wildfire", "landslide",
+                                      "storm", "displaced", "evacuation", "relief"],
+                         "indicators": [], "capability_sources": ["papers", "github", "worldbank_projects"]},
+    "consumer_goods": {"keywords": ["phone", "laptop", "clothes", "shoes", "furniture", "appliance", "spare parts",
+                                    "car parts", "tyres", "cosmetics", "electronics"],
+                       "indicators": [], "capability_sources": ["patents", "github", "wikidata"]},
+    "care": {"keywords": ["childcare", "daycare", "elderly care", "nursing home", "caregiver", "disability", "nanny"],
+             "indicators": [], "capability_sources": ["papers", "github"]},
+})
+
 GENERAL_INDICATORS = [
     ("NY.GDP.PCAP.PP.KD", "GDP per capita, PPP (constant international $)"),
     ("SP.POP.TOTL", "Population, total"),

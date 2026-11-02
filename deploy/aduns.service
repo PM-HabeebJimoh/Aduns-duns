@@ -1,0 +1,15 @@
+# systemd unit: sudo cp deploy/aduns.service /etc/systemd/system/ && sudo systemctl enable --now aduns
+[Unit]
+Description=Aduns 24/7 worldwide discovery engine
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/aduns
+ExecStart=/usr/bin/python3 -m aduns serve --port 8000 --daemon
+Restart=always
+RestartSec=20
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

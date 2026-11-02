@@ -24,6 +24,7 @@ ROUTE_LABELS = {
     "expert_transfer": "Bring in expertise / train local teams", "service_instead_of_product": "Offer as a service",
     "policy_pathway": "Policy / regulatory pathway", "cooperative_model": "Cooperative / shared-access model",
     "enable_existing_operator": "Enable an existing operator", "demand_aggregation": "Aggregate demand",
+    "use_idle_capacity": "Use existing idle capacity",
 }
 
 
@@ -51,8 +52,8 @@ class CapabilityDiscoveryAgent(Agent):
         # Hypothesis text = its statement + the strongest member signals
         hyp_text = query
         if hyp:
-            sig = db.q("""SELECT s.text FROM signals s JOIN hypothesis_signals hs ON hs.signal_id=s.id
-                          WHERE hs.hypothesis_id=? ORDER BY hs.similarity DESC LIMIT 15""", (hyp["id"],))
+            sig = db.q("""SELECT COALESCE(s.text_en, s.text) text FROM signals s JOIN hypothesis_signals hs
+                          ON hs.signal_id=s.id WHERE hs.hypothesis_id=? ORDER BY hs.similarity DESC LIMIT 15""", (hyp["id"],))
             hyp_text = hyp["need_statement"] + " " + " ".join(s["text"][:400] for s in sig)
 
         q_main = query or self._query_from_hypothesis(hyp, terms)
@@ -71,6 +72,8 @@ class CapabilityDiscoveryAgent(Agent):
         for qi, q_main in enumerate(queries):
             found += self._search(srcs, q_main, domain, limit_per_source if qi == 0 else max(4, limit_per_source // 2))
         q_main = queries[0]
+        # Local & hidden supply: apps in the target countries, know-how, idle assets, mapped providers
+        found += self._local_supply(q_main, target_countries)
         self.stats["fetched"] = len(found)
         if not found:
             return {"capability_ids": []}
@@ -102,6 +105,22 @@ class CapabilityDiscoveryAgent(Agent):
         coverage = (sum(1 for g in groups if g & stems) / len(groups)) if groups else 0.0
         cos = float(qv @ tf.transform(text))
         return round(0.75 * coverage + 0.25 * min(1.0, cos * 6), 4)
+
+    def _local_supply(self, q: str, targets: list[str]) -> list[dict]:
+        found: list[dict] = []
+        tgt = [geo.country(t) for t in targets[:2] if geo.country(t)]
+        for c in tgt:
+            found += self.safe(f"local_apps:{c['iso3']}", lambda c=c: C.local_apps(q, c["iso2"], 4), [])
+            cities = [x["name"] for x in c["cities"][:2]] or [c["capital"]]
+            found += self.safe(f"osm:{c['iso3']}", lambda c=c, ci=cities: C.osm_providers(q, c["iso2"], ci, 4), [])
+        gl = tgt[0]["iso2"] if tgt else "US"
+        found += self.safe("youtube_knowhow", lambda: C.youtube_knowhow(q, gl, "en", 6), [])
+        found += self.safe("idle_assets", lambda: C.idle_assets(q, 12), [])
+        # How the need is served in other markets (apps in leading markets on every continent)
+        for ref in ("US", "IN", "BR", "KE", "DE", "ID"):
+            if ref != gl:
+                found += self.safe(f"local_apps:{ref}", lambda r=ref: C.local_apps(q, r, 2), [])
+        return found
 
     def _search(self, srcs: list[str], q_main: str, domain: str | None, limit_per_source: int) -> list[dict]:
         found: list[dict] = []
@@ -174,7 +193,7 @@ class CapabilityDiscoveryAgent(Agent):
         """The thing that is needed: the hypothesis object (title before ' — '), minus commerce noise."""
         base = (hyp or {}).get("title", "").split(" — ")[0] if hyp else ""
         words = [w for w in nlp.tokens(geo.strip_places(base)) if w not in self.NOISE]
-        if len(words) < 2:
+        if not words:
             words = [w for w in nlp.tokens(geo.strip_places(self._query_from_terms(terms))) if w not in self.NOISE]
         return " ".join(dict.fromkeys(words))[:80] or " ".join(terms[:2])
 

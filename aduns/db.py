@@ -229,6 +229,30 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 """
 
+MIGRATIONS = [
+    "ALTER TABLE signals ADD COLUMN lang TEXT",
+    "ALTER TABLE signals ADD COLUMN text_en TEXT",
+    "ALTER TABLE signals ADD COLUMN scope_country TEXT",
+    "ALTER TABLE signals ADD COLUMN continent TEXT",
+    "ALTER TABLE signals ADD COLUMN published_ts REAL",
+    "ALTER TABLE hypotheses ADD COLUMN continents TEXT",
+    "ALTER TABLE hypotheses ADD COLUMN processed_at REAL",
+    "ALTER TABLE hypotheses ADD COLUMN scope TEXT",
+    "ALTER TABLE capabilities ADD COLUMN country TEXT",
+    "ALTER TABLE analogies ADD COLUMN method TEXT",
+    "ALTER TABLE analogies ADD COLUMN topic TEXT",
+    """CREATE TABLE IF NOT EXISTS sweeps (
+        country TEXT PRIMARY KEY, continent TEXT, last_started REAL, last_finished REAL, runs INTEGER DEFAULT 0,
+        signals_last INTEGER, signals_total INTEGER DEFAULT 0, sources_ok TEXT, sources_failed TEXT)""",
+    """CREATE TABLE IF NOT EXISTS source_registry (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, handle TEXT NOT NULL, country TEXT,
+        discovered_from TEXT, discovered_at REAL, last_crawled REAL, items_total INTEGER DEFAULT 0,
+        active INTEGER DEFAULT 1, UNIQUE(kind, handle))""",
+    """CREATE TABLE IF NOT EXISTS daemon_state (key TEXT PRIMARY KEY, value TEXT, at REAL)""",
+    "CREATE INDEX IF NOT EXISTS ix_signals_scope ON signals(scope_country)",
+    "CREATE INDEX IF NOT EXISTS ix_signals_pub ON signals(published_ts)",
+]
+
 _lock = threading.RLock()
 _conns: dict[str, sqlite3.Connection] = {}
 
@@ -246,6 +270,12 @@ def connect() -> sqlite3.Connection:
             conn = sqlite3.connect(p, check_same_thread=False, timeout=30)
             conn.row_factory = sqlite3.Row
             conn.executescript(SCHEMA)
+            for m in MIGRATIONS:
+                try:
+                    conn.execute(m)
+                except sqlite3.OperationalError:
+                    pass  # already applied
+            conn.commit()
             _conns[p] = conn
         return conn
 
