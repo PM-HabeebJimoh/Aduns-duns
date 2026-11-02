@@ -38,6 +38,7 @@ def main() -> None:
     dm = sub.add_parser("daemon", help="run the 24/7 autonomous worldwide discovery loop")
     dm.add_argument("--cycles", type=int, default=None); dm.add_argument("--parallel", type=int, default=2)
     dm.add_argument("--downstream", type=int, default=3)
+    dm.add_argument("--max-minutes", type=float, default=None, help="stop gracefully after this many minutes")
     sw = sub.add_parser("sweep", help="sweep one country in its own languages")
     sw.add_argument("--country", required=True)
     sub.add_parser("selftest", help="live check of every data source")
@@ -53,7 +54,7 @@ def main() -> None:
     if args.cmd == "daemon":
         from .scheduler import Daemon
         Daemon(parallel_countries=args.parallel, downstream_per_cycle=args.downstream,
-               sense_locally=not args.no_sense).run_forever(args.cycles)
+               sense_locally=not args.no_sense).run_forever(args.cycles, (args.max_minutes or 0) * 60 or None)
         return
     if args.cmd == "worker":
         import os

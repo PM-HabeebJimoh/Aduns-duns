@@ -59,7 +59,11 @@ class Daemon:
     def stopped(self) -> bool:
         return self._stop.is_set() or (config.ROOT / "data" / "STOP").exists()
 
-    def run_forever(self, max_cycles: int | None = None) -> None:
+    def run_forever(self, max_cycles: int | None = None, max_seconds: float | None = None) -> None:
+        deadline = time.time() + max_seconds if max_seconds else None
+        if deadline:
+            # graceful time box (e.g. CI runners): stop starting new cycles near the deadline
+            threading.Timer(max(1.0, max_seconds), self.stop).start()
         _set("status", "running")
         _set("started_at", time.time())
         # runs left 'running' by a previous process that was stopped are closed as aborted

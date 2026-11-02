@@ -146,7 +146,31 @@ has overridden it. Outward actions (publishing a page, contacting a partner, rec
 named human approves the opportunity in Governance. Nothing is synthesised: customers, quotes, interviews and money
 come only from real people and evidence links.
 
+## Money, tariffs and sanctions (real data)
+
+* **Payments in automatically:** `POST /webhooks/payments/{paystack|flutterwave|stripe|mpesa}`. Each provider's
+  signature is verified (Paystack HMAC-SHA512, Flutterwave verif-hash, Stripe signed timestamp with 5-minute replay
+  window, M-Pesa Daraja secret URL token). The payment reference must name the opportunity (`AD<id>` or
+  `AD<id>-…`). Revenue is recorded only for **human-approved** opportunities, de-duplicated by transaction id,
+  zero-decimal currencies are handled, and every payment goes into the audit ledger. Configure
+  `ADUNS_PAYSTACK_SECRET`, `ADUNS_FLW_HASH`, `ADUNS_STRIPE_WHSEC`, `ADUNS_MPESA_TOKEN` with your own accounts.
+* **Tariffs:** product-line duties from the **USITC HTS** (US) and the **UK Trade Tariff API**. Per-weight duties
+  such as "£121/1000 kg" are converted to ad-valorem using the Comtrade unit value. Elsewhere, the World Bank
+  country-average applied tariff is used and labelled as an average; the Red Team keeps "verify the product
+  tariff" as a condition until an official product-line rate or a measured rate exists.
+* **Sanctions screening:** about 40k entities across the **US Consolidated Screening List, EU Financial
+  Sanctions, the UN Security Council Consolidated List and the UK Sanctions List**, refreshed daily. A hit on any
+  asset-freeze list is a blocker.
+
+## Free 24/7 operation (GitHub Actions)
+
+`.github/workflows/aduns-24x7.yml` runs a 45-minute slice of the worldwide loop every 3 hours
+(`daemon --max-minutes 45` stops cleanly). The evidence database persists between runs in the Actions cache, and
+a coverage and top-needs report is uploaded as an artifact. Actions minutes are unlimited for **public**
+repositories; for a private repository, reduce the schedule as noted in the file. Scheduled workflows run from
+the default branch. For real-time operation (dashboard, webhooks, scouts), deploy `docker compose up -d` on any
+server.
+
 ## Roadmap
-- Payment-provider and mobile-money webhooks to record real transactions automatically (today entries are human-signed).
-- Tariff data feed (when a free, reachable source exists) to remove the last major assumption.
-- EU / UN sanctions lists alongside the US list; country-specific licence look-ups.
+- Country-specific licence look-ups (currently a per-sector checklist to verify).
+- EU product-level tariffs (TARIC needs a JavaScript renderer; the free API access is not reachable here).

@@ -151,7 +151,8 @@ class LegalSafetyAgent(Agent):
         for p in parties:
             for h in CP.screen(p):
                 hits.append(h)
-                flag("blocker" if "SDN" in h["source"] else "high", "sanctions",
+                freeze = any(k in h["source"] for k in ("SDN", "EU Financial", "UN Security", "UK Sanctions"))
+                flag("blocker" if freeze else "high", "sanctions",
                      f"Counterparty '{p}' matches '{h['matched']}' on {h['source']} ({h['match']} match).", h["url"])
         hs = (mk.get("hs") or {}).get("hs")
         ec = CP.export_controlled(hs)
@@ -256,10 +257,11 @@ class RedTeamAgent(Agent):
                  severity="high")
         # tariff: import-based economics resting on an assumed duty must be verified before any pilot
         duty = (econ.get("inputs") or {}).get("import_duty")
-        if duty and duty.get("kind") == "assumption" and o.get("best_route") in (
+        if duty and duty.get("kind") not in ("official", "measured") and o.get("best_route") in (
                 "import_and_resell", "local_agents_retail", "bundle", "local_distribution_partnership"):
-            fail("tariff_unverified", f"Import duty for HS {(o['market'].get('hs') or {}).get('hs')} into {o['country']} is an "
-                                      f"assumption ({duty['range'][0]:.0%}–{duty['range'][1]:.0%}); real tariffs (and "
+            fail("tariff_unverified", f"Import duty for HS {(o['market'].get('hs') or {}).get('hs')} into {o['country']} is "
+                                      f"{'a country average' if duty.get('kind') == 'official_average' else 'an assumption'} "
+                                      f"({duty['range'][0]:.0%}–{duty['range'][1]:.0%}); real product tariffs (and "
                                       f"quotas/state-trading) can exceed this and erase the margin. Verify the national "
                                       f"tariff schedule before piloting.", severity="high")
         # 3) Structural risks from the evidence

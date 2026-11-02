@@ -1,0 +1,59 @@
+# Free always-on discovery: GitHub runs a time-boxed slice of the 24/7 loop on a schedule and keeps the
+# evidence database between runs in the Actions cache. Scheduled workflows run on the repository's default branch.
+#
+# Cost: Actions minutes are free and unlimited for PUBLIC repositories. For a PRIVATE repo the free tier is
+# 2,000 min/month — change the cron to e.g. "23 */12 * * *" with --max-minutes 25 (≈1,500 min/month).
+name: aduns-24x7
+
+on:
+  schedule:
+    - cron: "23 */3 * * *"        # every 3 hours
+  workflow_dispatch:
+
+concurrency:
+  group: aduns-24x7
+  cancel-in-progress: false
+
+jobs:
+  discovery-cycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 58
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Restore evidence database
+        uses: actions/cache/restore@v4
+        with:
+          path: data/
+          key: aduns-db-${{ github.run_id }}
+          restore-keys: aduns-db-
+      - name: Run the worldwide loop (time-boxed, stops cleanly)
+        env:
+          ADUNS_CONTACT_EMAIL: ${{ secrets.ADUNS_CONTACT_EMAIL }}
+          ADUNS_ALERT_WEBHOOK: ${{ secrets.ADUNS_ALERT_WEBHOOK }}
+          ADUNS_TELEGRAM_TOKEN: ${{ secrets.ADUNS_TELEGRAM_TOKEN }}
+          ADUNS_ALERT_CHAT_ID: ${{ secrets.ADUNS_ALERT_CHAT_ID }}
+        run: python -m aduns daemon --parallel 3 --max-minutes 45
+      - name: Report
+        if: always()
+        run: |
+          python -m aduns coverage | tee coverage.txt
+          python -m aduns show > top-hypotheses.json
+      - name: Save evidence database
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/
+          key: aduns-db-${{ github.run_id }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: discovery-report-${{ github.run_id }}
+          path: |
+            coverage.txt
+            top-hypotheses.json
+          retention-days: 14

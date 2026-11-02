@@ -760,3 +760,15 @@ async def landing_post(slug: str, request: Request, lang: str = "en", handle: st
     except (PermissionError, ValueError) as e:
         msg = str(e)
     return _page_html(p, lang, msg)
+
+
+
+# ----------------------------------------------------------------- payment provider webhooks
+@app.post("/webhooks/payments/{provider}")
+async def payment_webhook(provider: str, request: Request):
+    from . import payments
+    body = await request.body()
+    try:
+        return payments.handle(provider, body, dict(request.headers), dict(request.query_params))
+    except payments.PaymentError as e:
+        raise HTTPException(e.status, str(e))

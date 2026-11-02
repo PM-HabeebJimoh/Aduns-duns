@@ -435,6 +435,18 @@ class EconomicsAgent(Agent):
         landed = {"freight_insurance": (0.08, 0.20), "import_duty": (0.0, 0.35), "local_logistics": (0.05, 0.12)} if is_goods else {}
         for k, (a, b) in landed.items():
             inputs[k] = {"range": [a, b], "kind": "assumption", "source": "verify tariff schedule & freight quotes"}
+        if is_goods:
+            from ..sources import tariffs as TR
+            t = TR.tariff_for(ctx["iso3"], market["hs"]["hs"])
+            if t:
+                av = TR.ad_valorem_equivalent(t, (market.get("imports") or {}).get("unit_value_usd_per_kg"))
+                if av is not None and t["kind"].startswith("official (product line)"):
+                    inputs["import_duty"] = {"range": [av, av * 1.0001], "kind": "official",
+                                             "source": f"{t['country']} tariff line {t.get('line')}: {t['text']} ({t['source']})"}
+                elif av is not None:
+                    inputs["import_duty"] = {"range": [av * 0.5, max(av * 3, av + 0.15)], "kind": "official_average",
+                                             "source": f"{t['text']} — country average; product-specific duty may differ "
+                                                       f"({t['source']})"}
         inputs["income_tax"] = {"range": [0.15, 0.35], "kind": "assumption", "source": "verify national corporate tax rate"}
         inputs["working_capital_days"] = {"range": [30, 90], "kind": "assumption", "source": "supplier/customer terms"}
         inputs.update(measured)

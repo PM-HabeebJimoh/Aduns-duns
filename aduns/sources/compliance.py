@@ -96,21 +96,95 @@ def refresh_screening_list(max_age_s: int = 86400) -> int:
     st = db.q1("SELECT at FROM daemon_state WHERE key='screening_list'")
     if st and time.time() - st["at"] < max_age_s:
         return db.q1("SELECT COUNT(*) n FROM screening_entities")["n"]
+    entities: list[tuple] = []
     r = requests.get(CSL_URL, timeout=180, headers={"User-Agent": config.USER_AGENT})
     r.raise_for_status()
-    rows = r.json().get("results", [])
+    for e in r.json().get("results", []):
+        entities.append((f"US:{e.get('id')}", e.get("name"), json.dumps(e.get("alt_names") or []), e.get("source"),
+                         json.dumps(e.get("programs") or []), e.get("country"), e.get("source_information_url")))
+    for name, fn in (("EU", _eu_list), ("UN", _un_list), ("UK", _uk_list)):
+        try:
+            got = fn()
+            entities += got
+            http._health(f"sanctions_{name.lower()}", True)
+        except Exception as ex:  # noqa: BLE001 — one list failing must not drop the others
+            http._health(f"sanctions_{name.lower()}", False, str(ex)[:300])
     with db.tx() as c:
         c.execute("DELETE FROM screening_entities")
-        for e in rows:
-            alts = e.get("alt_names") or []
-            c.execute("INSERT OR REPLACE INTO screening_entities VALUES (?,?,?,?,?,?,?,?)",
-                      (e.get("id"), e.get("name"), _norm(e.get("name")), json.dumps(alts), e.get("source"),
-                       json.dumps(e.get("programs") or []), e.get("country"), e.get("source_information_url")))
+        for (eid, name, alts, src, progs, country, url) in entities:
+            if name:
+                c.execute("INSERT OR REPLACE INTO screening_entities VALUES (?,?,?,?,?,?,?,?)",
+                          (eid, name, _norm(name), alts, src, progs, country, url))
         c.execute("INSERT OR REPLACE INTO daemon_state (key, value, at) VALUES ('screening_list', ?, ?)",
-                  (str(len(rows)), time.time()))
+                  (str(len(entities)), time.time()))
     http._health("screening_list", True)
     _index.clear()
-    return len(rows)
+    return len(entities)
+
+
+EU_URL = "https://webgate.ec.europa.eu/fsd/fsf/public/files/csvFullSanctionsList_1_1/content?token=dG9rZW4tMjAxNw"
+UN_URL = "https://scsanctions.un.org/resources/xml/en/consolidated.xml"
+UK_URL = "https://sanctionslist.fcdo.gov.uk/docs/UK-Sanctions-List.csv"
+
+
+def _eu_list() -> list[tuple]:
+    import csv
+    import io
+    r = requests.get(EU_URL, timeout=180, headers={"User-Agent": config.USER_AGENT})
+    r.raise_for_status()
+    rows = csv.DictReader(io.StringIO(r.content.decode("utf-8-sig", "replace")), delimiter=";")
+    by: dict[str, dict] = {}
+    for row in rows:
+        lid = row.get("Entity_LogicalId")
+        nm = (row.get("NameAlias_WholeName") or "").strip()
+        if not lid or not nm:
+            continue
+        d = by.setdefault(lid, {"names": [], "prog": row.get("Entity_Regulation_Programme"),
+                                "country": row.get("Address_CountryIso2Code") or row.get("Citizenship_CountryIso2Code")})
+        if nm not in d["names"]:
+            d["names"].append(nm)
+    return [(f"EU:{k}", v["names"][0], json.dumps(v["names"][1:6]), "EU Financial Sanctions (FSF)",
+             json.dumps([v["prog"]] if v["prog"] else []), v["country"],
+             "https://data.europa.eu/data/datasets/consolidated-list-of-persons-groups-and-entities-subject-to-eu-financial-sanctions")
+            for k, v in by.items()]
+
+
+def _un_list() -> list[tuple]:
+    import xml.etree.ElementTree as ET
+    r = requests.get(UN_URL, timeout=180, headers={"User-Agent": config.USER_AGENT})
+    r.raise_for_status()
+    root = ET.fromstring(r.content)
+    out = []
+    for tag in ("INDIVIDUAL", "ENTITY"):
+        for e in root.iter(tag):
+            parts = [e.findtext(k) or "" for k in ("FIRST_NAME", "SECOND_NAME", "THIRD_NAME", "FOURTH_NAME")]
+            name = " ".join(p for p in parts if p).strip()
+            aliases = [a.findtext("ALIAS_NAME") for a in e.iter(f"{tag}_ALIAS") if a.findtext("ALIAS_NAME")]
+            out.append((f"UN:{e.findtext('REFERENCE_NUMBER') or e.findtext('DATAID')}", name, json.dumps(aliases[:6]),
+                        "UN Security Council Consolidated List", json.dumps([e.findtext("UN_LIST_TYPE") or ""]),
+                        (e.findtext("NATIONALITY/VALUE") or "")[:60], UN_URL))
+    return out
+
+
+def _uk_list() -> list[tuple]:
+    import csv
+    import io
+    r = requests.get(UK_URL, timeout=180, headers={"User-Agent": config.USER_AGENT})
+    r.raise_for_status()
+    lines = r.content.decode("utf-8-sig", "replace").splitlines()
+    start = next(i for i, l in enumerate(lines) if l.startswith("Last Updated"))
+    by: dict[str, dict] = {}
+    for row in csv.DictReader(io.StringIO("\n".join(lines[start:]))):
+        uid = row.get("Unique ID")
+        parts = [row.get(f"Name {i}") or "" for i in (1, 2, 3, 4, 5)]
+        nm = " ".join(p for p in parts + [row.get("Name 6") or ""] if p).strip()
+        if not uid or not nm:
+            continue
+        d = by.setdefault(uid, {"names": [], "regime": row.get("Regime Name")})
+        if nm not in d["names"]:
+            d["names"].append(nm)
+    return [(f"UK:{k}", v["names"][0], json.dumps(v["names"][1:6]), "UK Sanctions List (FCDO/OFSI)",
+             json.dumps([v["regime"]] if v["regime"] else []), None, UK_URL) for k, v in by.items()]
 
 
 _index: dict = {}

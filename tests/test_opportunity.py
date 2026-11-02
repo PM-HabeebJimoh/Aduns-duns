@@ -41,7 +41,7 @@ def test_economics_monte_carlo_with_real_inputs(monkeypatch):
     assert r["evidence_confidence"] == round(1.0 * (1 - 0.25 * n_assume), 3)
     assert 0 < lp["gross_margin"]["p50"] < 1 and 0 <= lp["p_profitable"] <= 1
     assert lp["net_margin"]["p10"] <= lp["net_margin"]["p50"] <= lp["net_margin"]["p90"]
-    assert all(d["kind"] in ("real", "official", "assumption") for d in lp["top_drivers"])
+    assert all(d["kind"] in ("real", "official", "official_average", "measured", "assumption") for d in lp["top_drivers"])
 
 
 def test_economics_refuses_without_price_or_cost():
