@@ -99,7 +99,7 @@ async function openHyp(id) {
     <h3>Need types · Gap causes (why the gap exists)</h3>${kv(h.need_types)} ${kv(h.gap_causes)}
     <h3>Falsification tests</h3><ol class="guide">${(h.tests || []).map((t) => `<li>${esc(t)}</li>`).join("")}</ol>
     <div class="toolbar"><b>Review:</b> <button data-rev="confirmed" class="primary">Confirm real need</button><button data-rev="duplicate">Duplicate</button><button data-rev="noise">Noise</button><button data-rev="rejected">Reject</button>
-      ${h.momentum ? `<span class="chip">momentum ${(+h.momentum).toFixed(1)}×</span>` : ""}${h.emerging ? '<span class="chip ev-field_verified">EMERGING</span>' : ""}</div>
+      ${h.momentum ? `<span class="chip">momentum ${(+h.momentum).toFixed(1)}×${(h.score_breakdown || {}).observed_days < 14 ? " (insufficient history: " + (h.score_breakdown || {}).observed_days + "d observed)" : ""}</span>` : ""}${h.emerging ? '<span class="chip ev-field_verified">EMERGING</span>' : ""}</div>
     <div class="toolbar"><button data-act="cap">Find capabilities</button><button data-act="ana">Find cross-border analogies</button><button data-act="mis">Draft field mission</button><span id="actMsg" class="muted"></span></div>
     <h3>Evidence (${h.signals.length} real signals)</h3>
     ${h.signals.slice(0, 60).map((s) => `<div class="sig layer-${esc(s.layer)}"><div>${esc(s.text.slice(0, 380))}</div>${s.text_en && s.text_en !== s.text ? `<div class="muted">EN: ${esc(s.text_en.slice(0, 260))}</div>` : ""}

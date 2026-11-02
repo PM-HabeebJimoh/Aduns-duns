@@ -205,10 +205,18 @@ class SignalFusionAgent(Agent):
         # Single-source clusters are claims, not corroborated markets: dampen them.
         total *= 0.6 + 0.4 * min(1.0, (len(sources) - 1) / 2)
         # Momentum: evidence in the last 7 days vs the 7 days before (emerging needs accelerate).
-        ts_all = [m.get("published_ts") or _parse_date(m.get("published_at")) for m in members]
+        # only truly publication-dated evidence (not retrieval-dated autocomplete/trends/undated video)
+        ts_all = [m.get("published_ts") or _parse_date(m.get("published_at")) for m in members
+                  if m["source"] not in ("googlesuggest", "googletrends")
+                  and '"approx_date": true' not in (m.get("extra") or "")]
         r7 = sum(1 for t in ts_all if t and t >= now - 7 * 86400)
         p7 = sum(1 for t in ts_all if t and now - 14 * 86400 <= t < now - 7 * 86400)
         momentum = (r7 + 1) / (p7 + 1)
+        # bursts are only meaningful once the countries involved have been observed for ≥14 days
+        cs = list(countries)
+        first = db.q1(f"SELECT MIN(last_started) t FROM sweeps WHERE country IN ({','.join('?' * len(cs))})", cs)["t"] \
+            if cs else None
+        parts["observed_days"] = round((now - first) / 86400, 1) if first else 0.0
         parts["momentum"] = momentum
         parts["recent_7d"] = r7
         total *= 1 + 0.08 * min(math.log2(momentum), 2) if momentum > 1 else 1
@@ -288,7 +296,8 @@ class SignalFusionAgent(Agent):
             "signal_count": len(members), "source_count": len(sources), "layer_count": len(layers),
             "score": score, "score_breakdown": json.dumps(breakdown), "evidence_level": evidence,
             "momentum": breakdown.get("momentum"),
-            "emerging": int(breakdown.get("momentum", 1) >= 2 and breakdown.get("recent_7d", 0) >= 3),
+            "emerging": int(breakdown.get("momentum", 1) >= 2 and breakdown.get("recent_7d", 0) >= 3
+                            and breakdown.get("observed_days", 0) >= 14),
             "tests": json.dumps(tests), "updated_at": time.time(),
             "continents": json.dumps(dict(continents)), "scope": scope,
         }

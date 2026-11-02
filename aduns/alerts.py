@@ -34,7 +34,7 @@ def _send(text: str, payload: dict) -> bool:
     return sent
 
 
-def check(min_score: float = 0.55) -> list[dict]:
+def check(min_score: float = 0.75, max_per_run: int = 10) -> list[dict]:
     """Alert on hypotheses that are strong (score ≥ min_score) or emerging, once each. Returns alerts raised."""
     raised = []
     rows = db.q("""SELECT id, title, score, emerging, momentum, countries, scope FROM hypotheses
@@ -50,4 +50,6 @@ def check(min_score: float = 0.55) -> list[dict]:
         delivered = _send(text, {"hypothesis_id": h["id"], "kind": kind})
         db.insert("alerts_sent", {"key": key, "hypothesis_id": h["id"], "kind": kind, "at": time.time()}, ignore=True)
         raised.append({"hypothesis_id": h["id"], "kind": kind, "delivered": delivered, "text": text})
+        if len(raised) >= max_per_run:
+            break
     return raised

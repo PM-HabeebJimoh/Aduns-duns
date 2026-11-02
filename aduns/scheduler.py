@@ -62,6 +62,10 @@ class Daemon:
     def run_forever(self, max_cycles: int | None = None) -> None:
         _set("status", "running")
         _set("started_at", time.time())
+        # runs left 'running' by a previous process that was stopped are closed as aborted
+        db.execute("UPDATE agent_runs SET status='aborted', finished_at=? WHERE status='running' AND started_at < ?",
+                   (time.time(), time.time() - 7200))
+        db.execute("DELETE FROM leases WHERE until < ?", (time.time(),))
         while not self.stopped() and (max_cycles is None or self.cycle_no < max_cycles):
             try:
                 self.cycle()
