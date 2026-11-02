@@ -102,7 +102,7 @@ class SignalFusionAgent(Agent):
                 objs = f"{objs} {objs}"   # the needed object weighs more than incidental words
                 # Geography is tracked separately: strip place names so "X in Lagos" and "X in Kano" cluster together.
                 doc = geo.strip_places(f"{title} {body} {objs} {objs}")
-                docs.append(nlp.QUERY_TEMPLATE_WORDS.sub(" ", doc))
+                docs.append(nlp.normalize_need_words(nlp.QUERY_TEMPLATE_WORDS.sub(" ", doc)))
             tf = nlp.TfIdf(docs, min_df=1)
             M = tf.matrix()
             if M.shape[1] == 0:

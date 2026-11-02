@@ -37,7 +37,16 @@ those through to too under until up very was wasn't we we'd we'll we're we've we
 where's which while who who's whom why why's with won't would wouldn't you you'd you'll you're you've your yours yourself
 yourselves also just like get got really one two would anyone anybody someone something thing things know think want need
 way even much many make made use used still yet well back going go see say said new now way lot lots www com http https
-amp quot nbsp would could us via per etc ever every since already re ve ll isnt dont cant wont im ive youre thats""".split())
+amp quot nbsp would could us via per etc ever every since already re ve ll isnt dont cant wont im ive youre thats
+please first time will buy find today news live video watch latest says said amid help""".split())
+
+_SYNONYM_NORMALIZE = re.compile(r"\b(scarcity|scarcities|shortages|deficits?|dearth|lack of|short supply|stockouts?|"
+                                r"out of stock|sold out)\b", re.I)
+
+
+def normalize_need_words(text: str) -> str:
+    """Map synonyms of shortage onto one token so 'water scarcity' and 'water shortage' cluster together."""
+    return _SYNONYM_NORMALIZE.sub("shortage", text or "")
 
 # Words that come from our own query templates (autocomplete prefixes) — not information about the need.
 QUERY_TEMPLATE_WORDS = re.compile(
