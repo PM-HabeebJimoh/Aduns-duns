@@ -297,7 +297,7 @@ def record_event(experiment_id: int, actor: str, kind: str, value: float | None 
 ROLE_BY_TYPE = {"local_provider": "distribution / service partner", "local_digital_solution": "channel / platform partner",
                 "organization": "operator / supplier", "proven_vendor": "supplier", "ip_patent": "licensor",
                 "research": "know-how partner", "open_design": "design source", "skill_knowhow": "trainer",
-                "unused_asset": "capacity owner", "program_model": "programme partner"}
+                "unused_asset": "capacity owner"}   # programme models are reference designs, not counterparties
 _EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}")
 
 
