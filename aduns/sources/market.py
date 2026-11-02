@@ -195,8 +195,8 @@ _SYMBOLS = {"₦": "NGN", "KSh": "KES", "Ksh": "KES", "KES": "KES", "R": "ZAR", 
             "GH₵": "GHS", "₵": "GHS", "TSh": "TZS", "USh": "UGX", "E£": "EGP", "₺": "TRY", "₽": "RUB", "₴": "UAH",
             "R$": "BRL", "S/": "PEN", "Bs": "BOB", "₩": "KRW", "฿": "THB", "Br": "ETB", "CFA": "XOF", "FCFA": "XAF"}
 _AMOUNT = re.compile(r"(?:(?P<sym>US\$|R\$|GH₵|E£|KSh|Ksh|TSh|USh|FCFA|CFA|Rs|Rp|S/|Bs|Br|[₦₹€£$¥₱₫৳₵₺₽₴₩฿R])\s?"
-                     r"(?P<a>\d[\d,\.]*)\s?(?P<mult>k|m|million|bn|billion)?)|(?:(?P<b>\d[\d,\.]*)\s?"
-                     r"(?P<code>[A-Z]{3})\b)")
+                     r"(?P<a>\d[\d,\.]*)\s?(?P<mult>(?i:k|m|mn|million|bn|b|billion|trillion))?(?![A-Za-z]))|"
+                     r"(?:(?P<b>\d[\d,\.]*)\s?(?P<code>[A-Z]{3})\b)")
 
 
 _CUR_WORDS = {"shilling": ("KES", "TZS", "UGX", "SOS"), "shillings": ("KES", "TZS", "UGX", "SOS"),
@@ -212,7 +212,8 @@ _WORD_AMOUNT = re.compile(r"(?P<n>\d[\d,\.]*)\s?(?P<mult>k|m|million|bn|billion)
 _SH = re.compile(r"\bSh\.?\s?(?P<n>\d[\d,\.]*)")
 
 
-_NOT_A_PRICE = re.compile(r"\b(price target|target|shares?|stocks?|rating|valuation|market cap|salary|salaries|wages?|"
+_NOT_A_PRICE = re.compile(r"(/month|/mo\b|/year|/yr\b)|\b(price target|target|shares?|stocks?|rating|valuation|market cap|"
+                         r"salary|salaries|wages?|hire|hiring|province|government|minister|"
                          r"a month|per month|monthly|a year|per year|annual|budget|revenue|profit|investment|invest|"
                          r"fund|funding|loan|billion|million|bn|subsid\w*|tax|fine|bribe|debt|deal|contract|"
                          r"turnover|earnings|dividend)\b", re.I)
@@ -290,8 +291,9 @@ def _price_mentions_raw(texts: list[str], local_currency: str, object_words: lis
                 val = float(raw.replace(",", ""))
             except ValueError:
                 continue
-            mult = {"k": 1e3, "m": 1e6, "million": 1e6, "bn": 1e9, "billion": 1e9}.get((m.group("mult") or "").lower(), 1)
-            val *= mult
+            if m.group("mult") and m.group("mult").lower() not in ("k",):
+                continue   # millions/billions are budgets or market sizes, not consumer prices
+            val *= 1e3 if (m.group("mult") or "").lower() == "k" else 1
             if val <= 0 or val > 1e7 or cur not in fx:
                 continue
             ctx = t[max(0, m.start() - 50): m.end() + 50]
@@ -370,7 +372,7 @@ def clean_price_mentions(mentions: list[dict], bulk: bool) -> list[dict]:
         mentions = unit or mentions
     if len(mentions) >= 3:
         med = statistics.median(m["usd"] for m in mentions)
-        mentions = [m for m in mentions if med / 10 <= m["usd"] <= med * 10]
+        mentions = [m for m in mentions if med / 4 <= m["usd"] <= med * 4]
     # de-duplicate identical quotes
     seen, out = set(), []
     for m in mentions:
@@ -378,4 +380,15 @@ def clean_price_mentions(mentions: list[dict], bulk: bool) -> list[dict]:
         if k not in seen:
             seen.add(k)
             out.append(m)
+    return out
+
+
+
+def consistent_price(mentions: list[dict]) -> dict | None:
+    """A usable local price needs ≥2 independent quotes within a 4× band; otherwise it is inconclusive."""
+    vals = [m["usd"] for m in mentions if m["usd"] > 0]
+    if not vals or max(vals) / min(vals) > 4:
+        return None
+    out = summarize_prices(vals)
+    out["weak"] = len(vals) < 2          # a single quote is used, but counts half in evidence confidence
     return out

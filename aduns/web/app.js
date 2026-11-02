@@ -189,7 +189,8 @@ const usd = (x) => (x == null || !isFinite(x) ? "—" : "$" + Math.round(x).toLo
 async function loadOpps() {
   const rows = await api("/api/opportunities");
   $("#oppList").innerHTML = rows.map((o) => `<div class="item" data-id="${o.id}"><div class="t">${esc(o.object)} · ${esc(o.country_name)}</div>
-    <div class="m"><span class="score">${(+o.opportunity_score).toFixed(2)}</span> · best route: ${esc(o.best_route || "—")} · P(profitable) ${pct(o.p_profitable)}</div>
+    <div class="m"><span class="score">${(+o.opportunity_score).toFixed(2)}</span> · best route: ${esc(o.best_route || "—")} · P(profitable) ${pct(o.p_profitable)}
+      ${o.p_profitable == null ? '<span class="chip bad">needs field data</span>' : `<span class="chip ${o.evidence_confidence >= 0.66 ? "ev-field_verified" : "ev-claim"}">evidence confidence ${pct(o.evidence_confidence)}</span>`}</div>
     <div class="m">${esc(o.hypothesis_title || "")}</div></div>`).join("") || '<p class="muted">No opportunities designed yet.</p>';
   $("#oppList").querySelectorAll(".item").forEach((el) => el.addEventListener("click", () => openOpp(+el.dataset.id)));
 }
@@ -200,7 +201,9 @@ async function openOpp(id) {
   const imp = m.imports;
   $("#oppDetail").innerHTML = `
     <h2>${esc(o.object)} in ${esc(o.country_name)}</h2><p class="muted">${esc(o.hypothesis_title || "")}</p>
-    <div><span class="score">opportunity ${(+o.opportunity_score).toFixed(3)}</span> <span class="chip">best: ${esc(o.best_route)}</span> <span class="chip">P(profitable) ${pct(o.p_profitable)}</span></div>
+    <div><span class="score">opportunity ${(+o.opportunity_score).toFixed(3)}</span> <span class="chip">best: ${esc(o.best_route)}</span> <span class="chip">P(profitable) ${pct(o.p_profitable)}</span>
+      <span class="chip ${o.evidence_confidence >= 0.66 ? "ev-field_verified" : "ev-claim"}">evidence confidence ${pct(o.evidence_confidence)}</span></div>
+    <p class="muted">P(profitable) is only as reliable as its inputs: see “Inputs and provenance” and “Validate first” below. Assumptions are marked in red.</p>
     <h3>Market structure</h3>
     <p>${esc(m.structure || "")}. HS ${esc((m.hs || {}).hs || "—")} ${esc((m.hs || {}).description || "")}</p>
     ${imp ? `<p>Imports ${imp.year}: <b>${usd(imp.value_usd)}</b>, ${Math.round((imp.net_kg || 0) / 1000).toLocaleString()} t, unit value ${imp.unit_value_usd_per_kg ? "$" + imp.unit_value_usd_per_kg.toFixed(2) + "/kg" : "—"}, supplier concentration HHI ${imp.hhi} · ${link(imp.source_url, "Comtrade")}<br>

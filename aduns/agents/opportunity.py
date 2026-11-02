@@ -181,7 +181,6 @@ class LocalizationAgent(Agent):
         words = ctx["object"].split() + ([translate.from_english(ctx["object"], lang)] if lang != "en" else [])
         mentions = self.safe("prices", lambda: MK.price_mentions(texts, cur, words), []) or []
         mentions = MK.clean_price_mentions(mentions, MK.is_bulk(market_hs)) if mentions else []
-        usd = [m["usd"] for m in mentions if m["currency"] in (cur, "USD")]
         cutoff = time.time() - 90 * 86400
         infra = {}
         for label, words in {"power_outages": ["outage", "blackout", "load shedding", "power cut", "no electricity"],
@@ -200,8 +199,10 @@ class LocalizationAgent(Agent):
         out = {
             "country": c["name"], "iso3": iso3, "languages": langs, "official_languages": c.get("languages"),
             "currency": cur, "usd_rate": fx.get(cur), "fx_source": "https://open.er-api.com/v6/latest/USD",
-            "local_price_evidence": {"mentions": mentions[:15], "usd_summary": MK.summarize_prices(usd),
-                                     "kind": "real (prices quoted in collected local signals)"},
+            "local_price_evidence": {"mentions": mentions[:15],
+                                     "usd_summary": MK.consistent_price([m for m in mentions if m["currency"] in (cur, "USD")]),
+                                     "kind": "real (consumer prices quoted in local news/signals; ≥2 consistent quotes "
+                                             "required, else inconclusive)"},
             "infrastructure_constraints_90d": infra,
             "payment_rails_apps": pay,
             "local_channels": {r["kind"]: r["n"] for r in reg},
@@ -399,7 +400,10 @@ class EconomicsAgent(Agent):
         inputs: dict[str, dict] = {}
         if price_sum:
             lo, hi = price_sum["p25"], max(price_sum["p75"], price_sum["p25"] * 1.01)
-            inputs["price_usd"] = {"range": [lo, hi], "kind": "real", "source": "local price quotes in collected signals"}
+            if price_sum.get("weak"):
+                lo, hi = price_sum["median"] * 0.8, price_sum["median"] * 1.2
+            inputs["price_usd"] = {"range": [lo, hi], "kind": "real", "weak": bool(price_sum.get("weak")),
+                                   "source": f"local consumer price quotes (n={price_sum['n']})"}
         if unit_cost:
             inputs["unit_cost_usd"] = {"range": [unit_cost * 0.85, unit_cost * 1.15], "kind": "real",
                                        "source": routes["inputs"].get("unit_cost_source") or "trade data"}
@@ -475,7 +479,12 @@ class EconomicsAgent(Agent):
                 "opex_assumptions": {k: list(v) for k, v in costs.items()},
             })
         key = ["price_usd", "unit_cost_usd", "market_usd"]
-        confidence = round(sum(1 for k in key if inputs.get(k, {}).get("kind") in ("real", "official")) / len(key), 3)
+        confidence = round(sum((0.5 if inputs.get(k, {}).get("weak") else 1.0) for k in key
+                               if inputs.get(k, {}).get("kind") in ("real", "official")) / len(key), 3)
+        # results whose top-2 drivers include unverified assumptions (e.g. import duty) deserve less confidence
+        if results:
+            n_assume = sum(1 for d in results[0]["top_drivers"][:2] if d["kind"] == "assumption")
+            confidence = round(confidence * (1 - 0.25 * n_assume), 3)
         validate = []
         for res in results[:1]:
             for d in res["top_drivers"]:
