@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aduns Discovery</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">◎</span> Aduns <small>Discovery layer</small></div>
+  <nav id="tabs">
+    <button data-tab="overview" class="active">Overview</button>
+    <button data-tab="hypotheses">Hypotheses</button>
+    <button data-tab="signals">Signals</button>
+    <button data-tab="capabilities">Capabilities</button>
+    <button data-tab="field">Field network</button>
+    <button data-tab="runs">Runs &amp; audit</button>
+  </nav>
+</header>
+
+<main>
+<section id="overview" class="tab active">
+  <div class="grid2">
+    <div class="card">
+      <h2>Run discovery</h2>
+      <p class="muted">Senses real public data (news, forums, search demand, shortages, tenders, World Bank), fuses
+        signals into hypotheses, then finds capabilities, cross-border analogies and drafts field missions.</p>
+      <form id="discoverForm" class="form">
+        <label>Need / focus <input name="focus" required placeholder="e.g. solar freezer, dialysis, spare parts"></label>
+        <label>Country (optional) <input name="country" list="countryList" placeholder="e.g. Nigeria"></label>
+        <datalist id="countryList"></datalist>
+        <div class="row">
+          <label>Depth <select name="depth"><option>1</option><option>2</option><option>3</option></select></label>
+          <label>Top hypotheses <input name="top_n" type="number" value="5" min="1" max="20"></label>
+          <label class="check"><input type="checkbox" name="create_missions" checked> Draft field missions</label>
+        </div>
+        <button type="submit" class="primary">Start discovery</button>
+      </form>
+      <div id="jobBox"></div>
+    </div>
+    <div class="card">
+      <h2>Evidence graph</h2>
+      <div id="counts" class="kpis"></div>
+      <h3>Signals by layer</h3>
+      <div id="layers"></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Live data sources</h2>
+    <table class="tbl" id="sourcesTbl"><thead><tr><th>Source</th><th>OK</th><th>Errors</th><th>Last OK</th><th>Last error</th></tr></thead><tbody></tbody></table>
+  </div>
+</section>
+
+<section id="hypotheses" class="tab">
+  <div class="toolbar">
+    <select id="hypDomain"><option value="">All domains</option></select>
+    <label>Min signals <input id="hypMin" type="number" value="2" min="1" style="width:4em"></label>
+    <button id="refuseBtn" title="Re-cluster all stored signals">Re-run fusion</button>
+  </div>
+  <div class="split">
+    <div id="hypList" class="list"></div>
+    <div id="hypDetail" class="detail"><p class="muted">Select a hypothesis.</p></div>
+  </div>
+</section>
+
+<section id="signals" class="tab">
+  <div class="toolbar">
+    <input id="sigQ" placeholder="search text">
+    <select id="sigLayer"><option value="">All layers</option><option>visible</option><option>scattered</option>
+      <option>invisible</option><option>structural</option><option>offline</option></select>
+    <input id="sigSource" placeholder="source (e.g. reddit)">
+    <input id="sigCountry" placeholder="ISO3 (e.g. NGA)" style="width:7em">
+    <button id="sigGo">Filter</button>
+  </div>
+  <div id="sigList"></div>
+</section>
+
+<section id="capabilities" class="tab">
+  <div class="toolbar">
+    <select id="capType"><option value="">All types</option><option>ip_patent</option><option>research</option>
+      <option>open_design</option><option>program_model</option><option>proven_vendor</option><option>clinical</option>
+      <option>organization</option></select>
+    <input id="capQ" placeholder="search">
+    <button id="capGo">Filter</button>
+  </div>
+  <div id="capList"></div>
+</section>
+
+<section id="field" class="tab">
+  <div class="grid2">
+    <div class="card"><h2>Open missions</h2><div id="missionList"></div></div>
+    <div class="card">
+      <h2>Observations awaiting review</h2>
+      <p class="muted">Corroborated = matched by another scout or online signals. Validation pays the scout.</p>
+      <div id="obsList"></div>
+    </div>
+  </div>
+  <div class="grid2">
+    <div class="card"><h2>Scouts</h2><table class="tbl" id="scoutTbl"><thead><tr><th>#</th><th>Name</th><th>Role</th><th>Country</th><th>Obs.</th><th>Earned</th></tr></thead><tbody></tbody></table>
+      <p class="muted">Scouts join via the <a href="/scout">field form</a>, or SMS/WhatsApp (<code>JOIN name | role | country | town</code>) to <code>/webhooks/sms</code>.</p></div>
+    <div class="card"><h2>Compensation ledger</h2><table class="tbl" id="ledgerTbl"><thead><tr><th>Scout</th><th>Amount</th><th>Reason</th><th>Status</th></tr></thead><tbody></tbody></table></div>
+  </div>
+</section>
+
+<section id="runs" class="tab">
+  <div class="card"><h2>Agent runs</h2><table class="tbl" id="runsTbl"><thead><tr><th>#</th><th>Agent</th><th>Status</th><th>Params</th><th>Stats</th><th>Duration</th></tr></thead><tbody></tbody></table></div>
+  <div class="card"><h2>Audit log</h2><table class="tbl" id="auditTbl"><thead><tr><th>When</th><th>Actor</th><th>Action</th><th>Object</th><th>Detail</th></tr></thead><tbody></tbody></table></div>
+</section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

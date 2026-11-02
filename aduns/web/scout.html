@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aduns Field Scout</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<header class="top"><div class="brand"><span class="logo">◎</span> Aduns <small>Field scout</small></div></header>
+<main style="max-width:640px">
+  <div class="card">
+    <h2>1 · Join the field network</h2>
+    <p class="muted">You share what you see and hear about local needs and solutions. You are paid for each
+      submission and more for each validated observation. You can withdraw any time.</p>
+    <form id="join" class="form">
+      <label>Phone or username <input name="handle" required></label>
+      <label>Name <input name="display_name"></label>
+      <label>Role <input name="role" placeholder="shop owner, technician, farmer, health worker…"></label>
+      <div class="row"><label>Country <input name="country" required></label><label>Town <input name="locality"></label></div>
+      <label>Payout method <input name="payout_method" placeholder="mobile money number, bank…"></label>
+      <label class="check"><input type="checkbox" name="consent" required> I agree to share observations for opportunity research and understand how I am compensated.</label>
+      <button class="primary">Join</button><div id="joinMsg" class="muted"></div>
+    </form>
+  </div>
+  <div class="card">
+    <h2>2 · Submit an observation</h2>
+    <form id="obs" class="form">
+      <label>Your phone/username <input name="scout_handle" required></label>
+      <label>Mission code <input name="mission_code" placeholder="e.g. M3-AB12" list="missions"></label>
+      <datalist id="missions"></datalist>
+      <label>What did you see or hear? <textarea name="text" rows="5" required placeholder="Quote people in their own words where possible."></textarea></label>
+      <div class="row"><label>Price seen <input name="price" type="number" step="any"></label><label>Currency <input name="currency" maxlength="3" placeholder="NGN"></label></div>
+      <div class="row"><label>Place <input name="location"></label><label>Respondent <input name="respondent_type" placeholder="trader, farmer…"></label></div>
+      <label>Language of the conversation <input name="language"></label>
+      <button type="button" id="geoBtn">Add my GPS location</button><span id="geoMsg" class="muted"></span>
+      <label class="check"><input type="checkbox" name="consent_confirmed" required> The person I spoke with agreed to share this.</label>
+      <button class="primary">Submit</button><div id="obsMsg" class="muted"></div>
+    </form>
+  </div>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+let coords = {};
+fetch("/api/missions").then(r => r.json()).then(ms => { $("#missions").innerHTML = ms.map(m => `<option value="${m.code}">${m.title.replace(/</g, "")}</option>`).join(""); });
+$("#geoBtn").onclick = () => navigator.geolocation && navigator.geolocation.getCurrentPosition(p => { coords = { lat: p.coords.latitude, lon: p.coords.longitude }; $("#geoMsg").textContent = ` ${coords.lat.toFixed(4)}, ${coords.lon.toFixed(4)}`; }, e => { $("#geoMsg").textContent = " " + e.message; });
+async function post(url, body, msg) {
+  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const t = await r.json().catch(() => ({}));
+  msg.textContent = r.ok ? (t.observation_id ? `Recorded #${t.observation_id} (${t.status}). Thank you!` : "Welcome! You can now submit observations.") : (t.detail || "Error");
+  return r.ok;
+}
+$("#join").onsubmit = (e) => { e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); f.consent = !!f.consent; post("/api/scouts", f, $("#joinMsg")); $("#obs").scout_handle.value = f.handle; };
+$("#obs").onsubmit = async (e) => {
+  e.preventDefault(); const f = Object.fromEntries(new FormData(e.target));
+  f.consent_confirmed = !!f.consent_confirmed; f.price = f.price ? +f.price : null; f.mission_code = f.mission_code || null; f.channel = "web";
+  Object.assign(f, coords);
+  if (await post("/api/observations", f, $("#obsMsg"))) e.target.text.value = "";
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+fastapi>=0.110
+uvicorn>=0.29
+requests>=2.31
+numpy>=1.26
+pydantic>=2.6
+pytest>=8
+# optional: enables LLM enrichment when ANTHROPIC_API_KEY is set
+anthropic>=2.0
+python-multipart>=0.0.9
