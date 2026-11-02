@@ -116,6 +116,7 @@ class Daemon:
                                                            "superseded", "signals_considered")}
 
         report["downstream"] = self.downstream()
+        report["designed"] = self.design_opportunities()
         from . import alerts
         report["alerts"] = len(alerts.check())
         report["translated_backfill"] = self.backfill_translations()
@@ -150,6 +151,23 @@ class Daemon:
             db.update("hypotheses", h["id"], {"processed_at": time.time()})
             done.append(item)
         return done
+
+    def design_opportunities(self, per_cycle: int = 2) -> list[dict]:
+        """Layer 2: design opportunities for strong hypotheses whose capabilities/analogies are in (refresh 3-daily)."""
+        from .agents.opportunity import OpportunityDesigner, _ensure_table
+        _ensure_table()
+        rows = db.q("""SELECT h.id FROM hypotheses h WHERE h.status NOT IN ('superseded','stale','rejected')
+                       AND h.processed_at IS NOT NULL AND h.countries != '{}'
+                       AND NOT EXISTS (SELECT 1 FROM opportunities o WHERE o.hypothesis_id=h.id AND o.updated_at > ?)
+                       ORDER BY (h.status='validated') DESC, h.score DESC LIMIT ?""", (time.time() - 3 * 86400, per_cycle))
+        out = []
+        for r in rows:
+            if self.stopped():
+                break
+            _set("step", f"designing opportunity for hypothesis #{r['id']}")
+            res = OpportunityDesigner().run(hypothesis_id=r["id"])
+            out.append({"hypothesis": r["id"], **{k: res["stats"].get(k) for k in ("best_route", "score", "p_profitable")}})
+        return out
 
     @staticmethod
     def backfill_translations(limit: int = 120) -> int:

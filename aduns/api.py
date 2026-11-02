@@ -522,3 +522,43 @@ def learning_weights():
 @app.get("/api/alerts")
 def alerts_list():
     return db.q("SELECT a.*, h.title FROM alerts_sent a LEFT JOIN hypotheses h ON h.id=a.hypothesis_id ORDER BY at DESC LIMIT 200")
+
+
+
+# ----------------------------------------------------------------- opportunity design (layer 2)
+from .agents.opportunity import OpportunityDesigner, _ensure_table as _ensure_opp  # noqa: E402
+
+
+class DesignReq(BaseModel):
+    hypothesis_id: int
+    country: str = ""
+
+
+@app.post("/api/agents/opportunity-designer")
+def design_opportunity(req: DesignReq):
+    return _job("opportunity_designer", OpportunityDesigner().run, **req.model_dump())
+
+
+def _opp(o: dict, full: bool) -> dict:
+    for k in ("market", "localization", "composition", "defensibility", "routes", "economics"):
+        o[k] = db.loads(o[k], {}) if full else None
+    h = db.q1("SELECT title, score FROM hypotheses WHERE id=?", (o["hypothesis_id"],))
+    o["hypothesis_title"] = h["title"] if h else None
+    c = geo.country(o["country"])
+    o["country_name"] = c["name"] if c else o["country"]
+    return o
+
+
+@app.get("/api/opportunities")
+def opportunities(limit: int = 100):
+    _ensure_opp()
+    return [_opp(o, False) for o in db.q("SELECT * FROM opportunities ORDER BY opportunity_score DESC LIMIT ?", (limit,))]
+
+
+@app.get("/api/opportunities/{oid}")
+def opportunity(oid: int):
+    _ensure_opp()
+    o = db.q1("SELECT * FROM opportunities WHERE id=?", (oid,))
+    if not o:
+        raise HTTPException(404)
+    return _opp(o, True)

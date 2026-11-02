@@ -14,7 +14,7 @@ document.querySelectorAll("#tabs button").forEach((b) => b.addEventListener("cli
 function showTab(name) {
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.id === name));
-  ({ coverage: loadCoverage, overview: loadOverview, hypotheses: loadHypotheses, signals: loadSignals, capabilities: loadCaps, field: loadField, runs: loadRuns }[name] || (() => {}))();
+  ({ opportunities: loadOpps, coverage: loadCoverage, overview: loadOverview, hypotheses: loadHypotheses, signals: loadSignals, capabilities: loadCaps, field: loadField, runs: loadRuns }[name] || (() => {}))();
   try { localStorage.setItem("aduns.tab", name); } catch (_) {}
 }
 
@@ -100,7 +100,7 @@ async function openHyp(id) {
     <h3>Falsification tests</h3><ol class="guide">${(h.tests || []).map((t) => `<li>${esc(t)}</li>`).join("")}</ol>
     <div class="toolbar"><b>Review:</b> <button data-rev="confirmed" class="primary">Confirm real need</button><button data-rev="duplicate">Duplicate</button><button data-rev="noise">Noise</button><button data-rev="rejected">Reject</button>
       ${h.momentum ? `<span class="chip">momentum ${(+h.momentum).toFixed(1)}×${(h.score_breakdown || {}).observed_days < 14 ? " (insufficient history: " + (h.score_breakdown || {}).observed_days + "d observed)" : ""}</span>` : ""}${h.emerging ? '<span class="chip ev-field_verified">EMERGING</span>' : ""}</div>
-    <div class="toolbar"><button data-act="cap">Find capabilities</button><button data-act="ana">Find cross-border analogies</button><button data-act="mis">Draft field mission</button><span id="actMsg" class="muted"></span></div>
+    <div class="toolbar"><button data-act="cap">Find capabilities</button><button data-act="ana">Find cross-border analogies</button><button data-act="mis">Draft field mission</button><button data-act="opp" class="primary">Design opportunity</button><span id="actMsg" class="muted"></span></div>
     <h3>Evidence (${h.signals.length} real signals)</h3>
     ${h.signals.slice(0, 60).map((s) => `<div class="sig layer-${esc(s.layer)}"><div>${esc(s.text.slice(0, 380))}</div>${s.text_en && s.text_en !== s.text ? `<div class="muted">EN: ${esc(s.text_en.slice(0, 260))}</div>` : ""}
       <div class="src">${esc(s.layer)} · ${link(s.url, s.source)} · ${esc((s.published_at || "").slice(0, 10))} · need ${s.need_score} ${(s.need_types || []).map((t) => `<span class="chip">${esc(t)}</span>`).join("")}</div></div>`).join("")}
@@ -122,7 +122,8 @@ async function openHyp(id) {
     try {
       if (act === "mis") await api("/api/agents/offline-scout/missions", { method: "POST", body: JSON.stringify({ hypothesis_id: id }) });
       else {
-        const { job_id } = await api(act === "cap" ? "/api/agents/capability-discovery" : "/api/agents/cross-border-analogy", { method: "POST", body: JSON.stringify({ hypothesis_id: id }) });
+        const url = { cap: "/api/agents/capability-discovery", ana: "/api/agents/cross-border-analogy", opp: "/api/agents/opportunity-designer" }[act];
+        const { job_id } = await api(url, { method: "POST", body: JSON.stringify({ hypothesis_id: id }) });
         for (;;) { await new Promise((r) => setTimeout(r, 2000)); const j = await api(`/api/jobs/${job_id}`); if (j.status !== "running") { if (j.result && j.result.status === "error") throw new Error(j.result.stats.errors.join("; ")); break; } }
       }
       openHyp(id);
@@ -180,3 +181,52 @@ async function loadRuns() {
 let start = "overview";
 try { start = localStorage.getItem("aduns.tab") || "overview"; } catch (_) {}
 showTab(start);
+
+
+// ---------------------------------------------------------------- opportunities
+const pct = (x) => (x == null ? "—" : (100 * x).toFixed(0) + "%");
+const usd = (x) => (x == null || !isFinite(x) ? "—" : "$" + Math.round(x).toLocaleString());
+async function loadOpps() {
+  const rows = await api("/api/opportunities");
+  $("#oppList").innerHTML = rows.map((o) => `<div class="item" data-id="${o.id}"><div class="t">${esc(o.object)} · ${esc(o.country_name)}</div>
+    <div class="m"><span class="score">${(+o.opportunity_score).toFixed(2)}</span> · best route: ${esc(o.best_route || "—")} · P(profitable) ${pct(o.p_profitable)}</div>
+    <div class="m">${esc(o.hypothesis_title || "")}</div></div>`).join("") || '<p class="muted">No opportunities designed yet.</p>';
+  $("#oppList").querySelectorAll(".item").forEach((el) => el.addEventListener("click", () => openOpp(+el.dataset.id)));
+}
+async function openOpp(id) {
+  document.querySelectorAll("#oppList .item").forEach((el) => el.classList.toggle("sel", +el.dataset.id === id));
+  const o = await api(`/api/opportunities/${id}`);
+  const m = o.market || {}, L = o.localization || {}, C = o.composition || {}, D = o.defensibility || {}, R = o.routes || {}, E = o.economics || {};
+  const imp = m.imports;
+  $("#oppDetail").innerHTML = `
+    <h2>${esc(o.object)} in ${esc(o.country_name)}</h2><p class="muted">${esc(o.hypothesis_title || "")}</p>
+    <div><span class="score">opportunity ${(+o.opportunity_score).toFixed(3)}</span> <span class="chip">best: ${esc(o.best_route)}</span> <span class="chip">P(profitable) ${pct(o.p_profitable)}</span></div>
+    <h3>Market structure</h3>
+    <p>${esc(m.structure || "")}. HS ${esc((m.hs || {}).hs || "—")} ${esc((m.hs || {}).description || "")}</p>
+    ${imp ? `<p>Imports ${imp.year}: <b>${usd(imp.value_usd)}</b>, ${Math.round((imp.net_kg || 0) / 1000).toLocaleString()} t, unit value ${imp.unit_value_usd_per_kg ? "$" + imp.unit_value_usd_per_kg.toFixed(2) + "/kg" : "—"}, supplier concentration HHI ${imp.hhi} · ${link(imp.source_url, "Comtrade")}<br>
+      Suppliers: ${(imp.partners || []).slice(0, 5).map((p) => `${esc(p.iso3 || "?")} ${pct(p.share)}`).join(", ")}</p>` : '<p class="muted">No trade data (service or informal market).</p>'}
+    <p>Incumbents: ${(m.incumbents || []).map((c) => link(c.url, c.title) + (c.installs ? ` (${esc(c.installs)})` : "")).join(", ") || "none found"}</p>
+    <p class="muted">Barriers: ${esc(JSON.stringify(m.barriers || {}).slice(0, 300))}</p>
+    <h3>Localization</h3>
+    <p>Languages ${esc((L.languages || []).join(", "))} · currency ${esc(L.currency)} (1 USD = ${L.usd_rate ? (+L.usd_rate).toFixed(2) : "—"})
+     · local price evidence: ${L.local_price_evidence && L.local_price_evidence.usd_summary ? `median ${usd(L.local_price_evidence.usd_summary.median)} (n=${L.local_price_evidence.usd_summary.n})` : "none yet"}</p>
+    <p class="muted">${(L.local_price_evidence && L.local_price_evidence.mentions || []).slice(0, 4).map((x) => "“…" + esc(x.context) + "…”").join("<br>")}</p>
+    <p>Infrastructure (90d signals): ${esc(JSON.stringify(L.infrastructure_constraints_90d || {}))} · payment apps: ${esc((L.payment_rails_apps || []).slice(0, 4).join(", ") || "—")}</p>
+    <ul>${(L.design_implications || []).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+    <p class="muted">Value proposition: ${Object.entries(L.value_proposition || {}).map(([k, v]) => `[${esc(k)}] ${esc(v)}`).join(" · ")}</p>
+    <h3>Composed offerings</h3>
+    ${(C.offerings || []).map((of) => `<div class="cap"><b>${esc(of.name)}</b> <span class="muted">routes: ${esc(of.routes.join(", "))}</span>
+      <ul>${of.components.map((c) => `<li>${esc(c.role)}: ${link(c.url, c.title)} ${c.price_usd ? `<span class="chip">$${c.price_usd.join("–")}</span>` : ""}</li>`).join("")}</ul>
+      ${of.gaps.length ? `<div class="bad">Gaps: ${esc(of.gaps.join("; "))}</div>` : ""}</div>`).join("") || '<p class="muted">None.</p>'}
+    <h3>Delivery routes (14 evaluated)</h3>
+    <table class="tbl"><thead><tr><th>Route</th><th>Feasible</th><th>Score</th>${["affordability","margin","speed","upfront_capital","regulatory","reliability","defensibility","scalability"].map((k) => `<th>${k}</th>`).join("")}</tr></thead><tbody>
+    ${(R.routes || []).map((r) => `<tr><td>${esc(r.label)}</td><td class="${r.feasible ? "ok" : "bad"}">${r.feasible ? "yes" : esc(r.why_not)}</td><td>${r.score.toFixed(2)}</td>${["affordability","margin","speed","upfront_capital","regulatory","reliability","defensibility","scalability"].map((k) => `<td>${r.criteria[k].toFixed(2)}</td>`).join("")}</tr>`).join("")}</tbody></table>
+    <p class="muted">${esc(R.note || "")}</p>
+    <h3>Economics (${esc(E.econ_status || "")}, ${E.simulations || 0} simulations)</h3>
+    ${E.econ_status === "modelled" ? `<table class="tbl"><thead><tr><th>Route</th><th>Gross margin p50</th><th>Net margin p10 / p50 / p90</th><th>Revenue y1 p50</th><th>Net profit y1 p50</th><th>Capital p50</th><th>Payback</th><th>P(profitable)</th><th>Top drivers</th></tr></thead><tbody>
+      ${E.routes.map((r) => `<tr><td>${esc(r.label)}</td><td>${pct(r.gross_margin.p50)}</td><td>${pct(r.net_margin.p10)} / ${pct(r.net_margin.p50)} / ${pct(r.net_margin.p90)}</td><td>${usd(r.revenue_year1_usd.p50)}</td><td>${usd(r.net_profit_year1_usd.p50)}</td><td>${usd(r.capital_needed_usd.p50)}</td><td>${r.payback_months_p50 ? r.payback_months_p50.toFixed(0) + " mo" : "—"}</td><td>${pct(r.p_profitable)}</td><td>${r.top_drivers.map((d) => `${esc(d.input)} (${d.kind}, ${d.spearman})`).join("<br>")}</td></tr>`).join("")}</tbody></table>
+      <h3>Inputs and provenance</h3><ul>${Object.entries(E.inputs || {}).map(([k, v]) => `<li><b>${esc(k)}</b> ${esc(JSON.stringify(v.range))} — <span class="${v.kind === "assumption" ? "bad" : "ok"}">${esc(v.kind)}</span>: ${esc(v.source)}</li>`).join("")}</ul>
+      <p><b>Validate first:</b> ${esc((E.validation_priorities || []).join(", ") || "—")}</p>` : `<p class="bad">${esc((E.missing || []).join(", "))} missing — ${esc(E.next_step || "")}</p>`}
+    <h3>Defensibility (score ${D.score}, imitation risk ${D.imitation_risk})</h3>
+    <p>${Object.entries(D.factors || {}).map(([k, v]) => `<span class="chip">${esc(k)} ${v}</span>`).join("")}</p><ul>${(D.notes || []).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`;
+}

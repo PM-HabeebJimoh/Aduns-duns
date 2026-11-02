@@ -97,8 +97,23 @@ and Runs & audit.
 | `GITHUB_TOKEN`, `STACKEXCHANGE_KEY` | Higher rate limits (optional) |
 | `ANTHROPIC_API_KEY` | Optional Claude synthesis of hypotheses from their evidence |
 
+## Layer 2 — Opportunity design (`aduns/agents/opportunity.py`)
+
+For each strong hypothesis and target country, six agents design how to deliver the solution:
+
+| Agent | What it produces (real inputs) |
+|---|---|
+| **Market Structure** | Maps the need object to an HS product code, using a curated table for everyday goods and then choosing the code the country actually trades most. Reports market size, volume, landed unit value, supplier countries and supply concentration (HHI) from **UN Comtrade** (the latest year available, 2025 for many countries). Classifies the market (import-dependent, two-way, service, informal). Lists incumbents (local apps, mapped providers, organisations) and barriers (regulation mentions, failed public tenders, patents active in the country). |
+| **Localization** | Languages, currency (Wikidata) and live exchange rate. **Local consumer prices** extracted from the country's own news in its language: unit-normalised (for example "¥4,200 per 5kg"), outlier-filtered, and with financial, salary and stock-price contexts rejected. Also infrastructure limits from recent signals (outages, connectivity, fuel), mobile-money and wallet apps, local channels, and the value proposition translated into the local language. |
+| **Solution Composition** | Builds concrete offerings from discovered capabilities and lists any gaps: sourced supply (manufacturer FOB listings from Made-in-China, current supplier countries), local make (open or inactive-patent designs, fabricators, know-how), idle capacity, service or platform, and knowledge transfer. |
+| **Delivery-Route** | Scores all **14 routes** on 10 criteria (affordability, speed, upfront capital, margin, regulatory, operational simplicity, reliability, defensibility, local impact, scalability). Routes without supporting evidence are marked infeasible, with the reason. |
+| **Economics** | Monte Carlo (4,000 runs) of gross and net margin, year-1 revenue and profit, capital, payback and P(profitable), across the top 3 routes, after customer acquisition, field operations, support, fraud, overhead, freight, duty, financing and tax. **Every input is tagged real, official or assumption, with its source.** Sensitivity analysis names the inputs that drive the result; assumptions among them become the validation priorities. **Evidence confidence** (the share of price, cost and market-size inputs that are real) discounts assumption-driven results. If there is no price and no cost, the agent refuses to model and asks for field data. |
+| **Defensibility** | Exclusivity potential, network effects, switching costs, local relationships, data advantage, regulatory moat and scale economies, plus imitation risk with notes. |
+
+The 24/7 loop designs up to two opportunities per cycle (validated hypotheses first) and refreshes them every 3 days.
+They appear in the dashboard's **Opportunities** tab and at `/api/opportunities`.
+
 ## Roadmap (next layers)
-2. Opportunity design: solution composition, localization, delivery routes, economics, market structure, defensibility.
 3. Governance: verification, legal & safety, red team, impact, audit.
 4. Execution: experiments, partnerships, operations, customers, finance, expansion.
 5. Learning from real outcomes.

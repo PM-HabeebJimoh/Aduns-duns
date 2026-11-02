@@ -20,9 +20,9 @@ class Agent:
     # ---- lifecycle -------------------------------------------------------
     def run(self, **params) -> dict:
         self.stats, self.errors = {}, []
-        self.run_id = db.insert("agent_runs", {"agent": self.name, "params": json.dumps(params, default=str),
+        self.run_id = db.insert("agent_runs", {"agent": self.name, "params": _summ(params),
                                                "status": "running", "started_at": time.time()})
-        db.audit(self.name, "run_started", "agent_run", self.run_id, params)
+        db.audit(self.name, "run_started", "agent_run", self.run_id, _summ(params))
         try:
             result = self.execute(**params) or {}
             status = "ok" if not self.errors else "partial"
@@ -53,3 +53,16 @@ class Agent:
 
     def bump(self, key: str, n: int = 1) -> None:
         self.stats[key] = self.stats.get(key, 0) + n
+
+
+def _summ(params: dict) -> str:
+    """Compact, bounded JSON of run parameters (large context objects are summarised, not stored)."""
+    out = {}
+    for k, v in params.items():
+        if isinstance(v, dict) and "hyp" in v:
+            out[k] = {"hypothesis_id": v["hyp"]["id"], "country": v.get("iso3"), "object": v.get("object")}
+        elif isinstance(v, (dict, list)):
+            out[k] = f"<{type(v).__name__} len={len(v)}>"
+        else:
+            out[k] = v
+    return json.dumps(out, default=str)[:2000]
