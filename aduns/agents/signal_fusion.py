@@ -86,6 +86,7 @@ class SignalFusionAgent(Agent):
         self.stats["clusters"] = len(clusters)
 
         hyp_ids: list[int] = []
+        self._taken: set[int] = set()
         for cl in clusters:
             members = [rows[i] for i in cl]
             structural_single = (len(cl) == 1 and allow_structural_singletons
@@ -96,8 +97,46 @@ class SignalFusionAgent(Agent):
             hid = self._upsert(members, centroid, tf, [float(centroid @ M[i]) for i in cl])
             if hid:
                 hyp_ids.append(hid)
+                self._taken.add(hid)
         self.stats["hypotheses"] = len(hyp_ids)
+        self._supersede(hyp_ids, {r["id"] for r in rows})
         return {"hypothesis_ids": hyp_ids}
+
+    @staticmethod
+    def _sigs(hid: int) -> set[int]:
+        return {r["signal_id"] for r in db.q("SELECT signal_id FROM hypothesis_signals WHERE hypothesis_id=?", (hid,))}
+
+    def _match_existing(self, member_ids: set[int], taken: set[int]) -> int | None:
+        """Stable identity: an existing live hypothesis sharing >= 50% of its evidence with this cluster."""
+        best, best_ov = None, 0.0
+        cands = db.q(f"""SELECT DISTINCT hs.hypothesis_id id FROM hypothesis_signals hs JOIN hypotheses h ON h.id=hs.hypothesis_id
+                         WHERE h.status != 'superseded' AND hs.signal_id IN ({','.join('?' * len(member_ids))})""",
+                     list(member_ids))
+        for c in cands:
+            if c["id"] in taken:
+                continue
+            sigs = self._sigs(c["id"])
+            ov = len(sigs & member_ids) / max(1, min(len(sigs), len(member_ids)))
+            if ov >= 0.5 and ov > best_ov:
+                best, best_ov = c["id"], ov
+        return best
+
+    def _supersede(self, current: list[int], considered: set[int]) -> None:
+        """Older hypotheses whose evidence (within this run's scope) now lives mostly in a current one."""
+        if not current:
+            return
+        cur_sigs = {h: self._sigs(h) for h in current}
+        for old in db.q(f"SELECT id FROM hypotheses WHERE status != 'superseded' AND id NOT IN ({','.join('?' * len(current))})",
+                        current):
+            sigs = self._sigs(old["id"]) & considered
+            if not sigs:
+                continue
+            for h, cs in cur_sigs.items():
+                if len(sigs & cs) / len(sigs) >= 0.5:
+                    db.update("hypotheses", old["id"], {"status": "superseded", "updated_at": time.time()})
+                    db.audit(self.name, "hypothesis_superseded", "hypothesis", old["id"], {"by": h})
+                    self.bump("superseded")
+                    break
 
     # ---------------------------------------------------------------- scoring
     @staticmethod
@@ -182,7 +221,14 @@ class SignalFusionAgent(Agent):
         evidence = "field_verified" if validated_field else ("corroborated" if len(sources) >= 2 else "claim")
 
         fp = http.content_hash(domain, *sorted(terms[:4]))
-        existing = db.q1("SELECT id FROM hypotheses WHERE fingerprint=?", (fp,))
+        member_ids = {m["id"] for m in members}
+        hid_match = self._match_existing(member_ids, self._taken)
+        existing = {"id": hid_match} if hid_match else db.q1(
+            "SELECT id FROM hypotheses WHERE fingerprint=? AND status != 'superseded'", (fp,))
+        if existing and existing["id"] in self._taken:
+            existing = None
+        if not existing and db.q1("SELECT id FROM hypotheses WHERE fingerprint=?", (fp,)):
+            fp = http.content_hash(fp, time.time())  # fingerprint held by a superseded/other hypothesis
         row = {
             "title": title[:200], "need_statement": statement, "domain": domain,
             "key_terms": json.dumps(terms), "countries": json.dumps(dict(countries.most_common(10))),
@@ -198,6 +244,9 @@ class SignalFusionAgent(Agent):
         if existing:
             hid = existing["id"]
             db.update("hypotheses", hid, row)
+            with db.tx() as conn:  # evidence set is recomputed each run
+                conn.execute("DELETE FROM hypothesis_signals WHERE hypothesis_id=? AND signal_id NOT IN "
+                             "(SELECT id FROM signals WHERE source LIKE 'field:%')", (hid,))
             self.bump("hypotheses_updated")
         else:
             hid = db.insert("hypotheses", {**row, "fingerprint": fp, "status": "open", "created_at": time.time()})

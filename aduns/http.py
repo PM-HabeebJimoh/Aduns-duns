@@ -35,7 +35,7 @@ HOST_INTERVAL = {
     "www.wikidata.org": 0.5,
     "api.stackexchange.com": 0.5,
     "hn.algolia.com": 0.3,
-    "api.crossref.org": 0.3,
+    "api.crossref.org": 1.2,
 }
 DEFAULT_INTERVAL = 0.5
 

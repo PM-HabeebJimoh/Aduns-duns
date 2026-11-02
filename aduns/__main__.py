@@ -64,7 +64,7 @@ def main() -> None:
         uvicorn.run("aduns.api:app", host=args.host, port=args.port)
         return
     else:
-        out = db.q("SELECT id, score, evidence_level, signal_count, source_count, title FROM hypotheses ORDER BY score DESC LIMIT 25")
+        out = db.q("SELECT id, score, evidence_level, signal_count, source_count, title FROM hypotheses WHERE status != 'superseded' ORDER BY score DESC LIMIT 25")
     print(json.dumps(out, indent=2, default=str))
 
 

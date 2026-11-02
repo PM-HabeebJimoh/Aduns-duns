@@ -207,9 +207,11 @@ def _hyp(r: dict) -> dict:
 @app.get("/api/hypotheses")
 def hypotheses(domain: str = "", status: str = "", min_signals: int = 1, limit: int = 100):
     where, params = ["signal_count >= ?"], [min_signals]
+    if status != "all":
+        where.append("status != 'superseded'")
     if domain:
         where.append("domain = ?"); params.append(domain)
-    if status:
+    if status and status != "all":
         where.append("status = ?"); params.append(status)
     rows = db.q(f"SELECT * FROM hypotheses WHERE {' AND '.join(where)} ORDER BY score DESC LIMIT ?", (*params, limit))
     return [_hyp(r) for r in rows]

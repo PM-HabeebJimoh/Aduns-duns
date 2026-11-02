@@ -18,7 +18,7 @@ import statistics
 import time
 from collections import Counter
 
-from .. import db, geo, http, taxonomy
+from .. import db, geo, taxonomy
 from ..sources import capabilities as C
 from ..sources import worldbank
 from .base import Agent
@@ -90,7 +90,7 @@ class CrossBorderAnalogyAgent(Agent):
             cands.sort(reverse=True)
             for rank, (score, p, v_a, y_a, change, inc_sim, dev) in enumerate(cands[:top_k]):
                 # "how they did it" evidence for the strongest analogs (each costs 2 API calls)
-                evidence = self._evidence(p, domain, hyp) if with_evidence and rank < 3 else []
+                evidence = self._evidence(p, domain, hyp, label) if with_evidence and rank < 3 else []
                 aid = db.insert("analogies", {
                     "hypothesis_id": hyp["id"] if hyp else None, "target_country": iso3, "analog_country": p,
                     "indicator_code": code, "indicator_name": label, "target_value": v_t, "analog_value": v_a,
@@ -112,23 +112,33 @@ class CrossBorderAnalogyAgent(Agent):
                     self.bump("analogies")
         return {"analogy_ids": ids, "target": target["name"] if target else iso3}
 
-    def _evidence(self, iso3: str, domain: str, hyp: dict | None) -> list[dict]:
+    @staticmethod
+    def indicator_topic(label: str) -> str:
+        """'Access to electricity, rural (% of rural population)' → 'electricity rural'."""
+        base = label.split("(")[0].replace(",", " ").replace(":", " ")
+        drop = {"access", "to", "of", "the", "and", "people", "using", "at", "least", "basic", "services", "lpi",
+                "quality", "trade", "per", "individuals", "population", "total", "domestic", "time", "required"}
+        return " ".join(w for w in base.lower().split() if w not in drop)[:60]
+
+    def _evidence(self, iso3: str, domain: str, hyp: dict | None, label: str = "") -> list[dict]:
         c = geo.country(iso3)
         if not c:
             return []
         kw = taxonomy.DOMAINS[domain]["keywords"]
-        topic = " ".join(db.loads(hyp["key_terms"], [])[:2]) if hyp else kw[0]
+        topic = self.indicator_topic(label) if label else kw[0]
         out: list[dict] = []
-        projs = self.safe(f"wbproj:{iso3}", lambda: worldbank.projects(f"{kw[0]} {topic}".strip(), country=c["iso2"],
-                                                                          limit=4), []) or []
+        projs = self.safe(f"wbproj:{iso3}", lambda: worldbank.projects(topic, country=c["iso2"], limit=4), []) or []
         if not projs:
-            projs = self.safe(f"wbproj:{iso3}", lambda: worldbank.projects(kw[0], country=c["iso2"], limit=4), []) or []
+            projs = self.safe(f"wbproj:{iso3}", lambda: worldbank.projects(topic.split()[0], country=c["iso2"],
+                                                                              limit=4), []) or []
         for p in projs[:4]:
             out.append({"source": "worldbank_projects", "title": p.get("name"), "url": p.get("url"),
                         "status": p.get("status"), "approved": p.get("approved")})
         name = c["name"].split(",")[0]
-        papers = self.safe(f"crossref:{iso3}", lambda: C.crossref(f"{name} {topic} access", limit=4), []) or []
-        for p in papers[:3]:
-            if name.lower() in (p["title"] + " " + (p.get("description") or "")).lower():
+        papers = self.safe(f"crossref:{iso3}", lambda: C.crossref(f"{name} {topic}", limit=4), []) or []
+        topic_words = [w for w in topic.split() if len(w) > 3]
+        for p in papers[:4]:
+            blob = (p["title"] + " " + (p.get("description") or "")).lower()
+            if name.lower() in blob and any(w[:6] in p["title"].lower() for w in topic_words):
                 out.append({"source": "crossref", "title": p["title"], "url": p["url"], "year": p.get("year")})
         return out

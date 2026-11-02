@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import math
 import xml.etree.ElementTree as ET
-from urllib.parse import quote
 
 from .. import config, http
 from ..nlp import clean
@@ -34,7 +33,7 @@ def _year(s) -> int | None:
 
 # ------------------------------------------------------------------ Google Patents
 def google_patents(query: str, limit: int = 15) -> list[dict]:
-    q = f"q=({quote(query)})&num={min(limit, 100)}&sort=new"
+    q = f"q=({query})&num={min(limit, 100)}"  # urlencode() below encodes once
     data = http.fetch("https://patents.google.com/xhr/query", {"url": q, "exp": ""}, source="googlepatents", ttl=_TTL)
     out = []
     for cl in (data.get("results") or {}).get("cluster", []):

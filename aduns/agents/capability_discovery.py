@@ -27,11 +27,21 @@ ROUTE_LABELS = {
 }
 
 
+# Functional synonyms used for concept coverage (kept small and auditable).
+SYNONYMS = {
+    "solar": ["photovoltaic", "pv", "sun"], "freezer": ["refrigerator", "fridge", "refrigeration", "cold"],
+    "fridge": ["refrigerator", "freezer", "refrigeration"], "dialysis": ["hemodialysis", "haemodialysis", "renal"],
+    "generator": ["genset"], "tractor": ["tillage", "mechanization"], "loan": ["credit", "microfinance", "lending"],
+    "water": ["potable", "drinking"], "dryer": ["drier", "drying", "dehydrator"], "internet": ["connectivity", "broadband"],
+    "insulin": ["diabetes"], "oxygen": ["o2", "concentrator"], "battery": ["batteries", "storage"],
+}
+
+
 class CapabilityDiscoveryAgent(Agent):
     name = "capability_discovery"
 
     def execute(self, hypothesis_id: int | None = None, query: str = "", sources: list[str] | None = None,
-                limit_per_source: int = 12, min_relevance: float = 0.04) -> dict:
+                limit_per_source: int = 12, min_relevance: float = 0.6) -> dict:
         hyp = db.q1("SELECT * FROM hypotheses WHERE id=?", (hypothesis_id,)) if hypothesis_id else None
         if not hyp and not query:
             raise ValueError("hypothesis_id or query required")
@@ -45,11 +55,55 @@ class CapabilityDiscoveryAgent(Agent):
                           WHERE hs.hypothesis_id=? ORDER BY hs.similarity DESC LIMIT 15""", (hyp["id"],))
             hyp_text = hyp["need_statement"] + " " + " ".join(s["text"][:400] for s in sig)
 
-        q_main = query or self._query_from_terms(terms)
+        q_main = query or self._query_from_hypothesis(hyp, terms)
         srcs = sources or (taxonomy.DOMAINS.get(domain, {}).get("capability_sources")
                            or ["patents", "papers", "github", "worldbank_projects", "wikidata"])
         self.stats.update({"query": q_main, "sources": srcs, "domain": domain})
 
+        found: list[dict] = []
+        queries = [q_main]
+        # Functional equivalents: also search the generic function within the domain
+        # (e.g. "solar freezer" → "solar refrigeration" / "cold storage").
+        generic = self._generic_query(q_main, domain)
+        if generic and generic != q_main:
+            queries.append(generic)
+        self.stats["queries"] = queries
+        for qi, q_main in enumerate(queries):
+            found += self._search(srcs, q_main, domain, limit_per_source if qi == 0 else max(4, limit_per_source // 2))
+        q_main = queries[0]
+        self.stats["fetched"] = len(found)
+        if not found:
+            return {"capability_ids": []}
+        self._concepts = self._concept_groups(q_main, domain)
+        return self._link(found, hyp, hyp_text, target_countries, min_relevance)
+
+    @staticmethod
+    def _stem(w: str) -> str:
+        """Crude but robust: drop plural 's', keep a 7-char prefix (refrigerator ≈ refrigeration)."""
+        if w.endswith("s") and len(w) > 4:
+            w = w[:-1]
+        return w[:7]
+
+    def _concept_groups(self, q: str, domain: str | None) -> list[set[str]]:
+        """Each query word is a concept; domain vocabulary words are interchangeable functional equivalents."""
+        dom_kw = set()
+        for kw in taxonomy.DOMAINS.get(domain or "", {}).get("keywords", []):
+            dom_kw.update(self._stem(w) for w in kw.split())
+        groups = []
+        for w in nlp.tokens(q):
+            st = self._stem(w)
+            syn = {self._stem(x) for x in SYNONYMS.get(w, [])}
+            groups.append({st} | syn | (dom_kw if st in dom_kw else set()))
+        return groups
+
+    def relevance(self, text: str, qv, tf) -> float:
+        stems = {self._stem(w) for w in nlp.tokens(text)}
+        groups = getattr(self, "_concepts", [])
+        coverage = (sum(1 for g in groups if g & stems) / len(groups)) if groups else 0.0
+        cos = float(qv @ tf.transform(text))
+        return round(0.75 * coverage + 0.25 * min(1.0, cos * 6), 4)
+
+    def _search(self, srcs: list[str], q_main: str, domain: str | None, limit_per_source: int) -> list[dict]:
         found: list[dict] = []
         for s in srcs:
             fn = C.CAPABILITY_SOURCES.get(s)
@@ -59,18 +113,28 @@ class CapabilityDiscoveryAgent(Agent):
                 found += self.safe(s, lambda fn=fn: fn(q_main, limit_per_source), [])
             if s == "papers" and domain in ("health", "medicines", "agriculture", "water_sanitation", "cold_chain"):
                 found += self.safe("europepmc", lambda: C.europepmc(q_main, limit_per_source), [])
-        self.stats["fetched"] = len(found)
-        if not found:
-            return {"capability_ids": []}
+        return found
 
+    def _link(self, found: list[dict], hyp: dict | None, hyp_text: str, target_countries: list[str],
+              min_relevance: float) -> dict:
+        # de-duplicate across queries
+        uniq: dict[tuple, dict] = {}
+        for c in found:
+            uniq.setdefault((c["source"], str(c["external_id"])), c)
+        found = list(uniq.values())
         # Relevance = cosine(hypothesis, capability) in a shared TF-IDF space.
         docs = [hyp_text] + [f"{c['title']} {c.get('description') or ''}" for c in found]
         tf = nlp.TfIdf(docs)
         hv = tf.transform(hyp_text)
+        qv = tf.transform(" ".join(" ".join(sorted(g)) for g in getattr(self, "_concepts", [])) or hyp_text)
         ids: list[int] = []
+        if hyp:  # links are recomputed from scratch each run
+            with db.tx() as conn:
+                conn.execute("DELETE FROM hypothesis_capabilities WHERE hypothesis_id=?", (hyp["id"],))
         for c in found:
-            cv = tf.transform(f"{c['title']} {c.get('description') or ''}")
-            rel = float(hv @ cv)
+            ctext = f"{c['title']} {c.get('description') or ''}"
+            cv = tf.transform(ctext)
+            rel = self.relevance(ctext, qv, tf)
             if rel < min_relevance:
                 self.bump("dropped_irrelevant")
                 continue
@@ -102,6 +166,31 @@ class CapabilityDiscoveryAgent(Agent):
                                  (hyp["id"], cid, round(rel, 4), rationale))
         self.stats["linked"] = len(ids)
         return {"capability_ids": ids}
+
+    NOISE = {"price", "prices", "sale", "buy", "cost", "cheap", "cheapest", "best", "near", "shop", "jumia", "konga",
+             "amazon", "alibaba", "online", "new", "used", "brand", "review", "reviews", "much", "how", "deep"}
+
+    def _query_from_hypothesis(self, hyp: dict | None, terms: list[str]) -> str:
+        """The thing that is needed: the hypothesis object (title before ' — '), minus commerce noise."""
+        base = (hyp or {}).get("title", "").split(" — ")[0] if hyp else ""
+        words = [w for w in nlp.tokens(geo.strip_places(base)) if w not in self.NOISE]
+        if len(words) < 2:
+            words = [w for w in nlp.tokens(geo.strip_places(self._query_from_terms(terms))) if w not in self.NOISE]
+        return " ".join(dict.fromkeys(words))[:80] or " ".join(terms[:2])
+
+    @staticmethod
+    def _generic_query(q: str, domain: str | None) -> str | None:
+        generic = {
+            "cold_chain": "refrigeration", "energy": "off-grid power", "water_sanitation": "water treatment",
+            "health": "low-cost medical device", "medicines": "drug supply", "agriculture": "smallholder",
+            "finance": "microfinance", "digital": "connectivity", "logistics": "last mile delivery",
+            "manufacturing": "local manufacturing", "education_skills": "vocational training",
+            "housing_construction": "low-cost housing", "business_services": "small business",
+        }.get(domain or "")
+        if not generic:
+            return None
+        head = q.split()[0] if q else ""
+        return f"{head} {generic}".strip() if head and head not in generic else generic
 
     @staticmethod
     def _query_from_terms(terms: list[str]) -> str:

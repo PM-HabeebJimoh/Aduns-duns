@@ -71,7 +71,7 @@ def stackexchange(query: str, site: str = "diy", limit: int = 30) -> list[dict]:
               "filter": "default"}
     if config.STACKEXCHANGE_KEY:
         params["key"] = config.STACKEXCHANGE_KEY
-    data = http.fetch("https://api.stackexchange.com/2.3/search/excerpts", params, source=f"stackexchange")
+    data = http.fetch("https://api.stackexchange.com/2.3/search/excerpts", params, source="stackexchange")
     out = []
     for it in data.get("items", []):
         qid = it.get("question_id")

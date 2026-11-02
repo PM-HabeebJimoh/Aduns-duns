@@ -155,6 +155,9 @@ _OBJ = re.compile(
 )
 
 
+_PREPS = {"in", "at", "for", "near", "from", "on", "to", "with", "because", "since", "and", "or", "but", "so", "here", "there", "anymore"}
+
+
 def detect_need(text: str) -> dict:
     """Classify a text fragment as a need signal.
 
@@ -184,7 +187,12 @@ def detect_need(text: str) -> dict:
     need_score = round(1.0 - p, 3)
     objects = []
     for m in _OBJ.finditer(low):
-        phrase = " ".join(w for w in m.group(1).split() if w not in STOP)
+        words = []
+        for w in m.group(1).split():
+            if w in _PREPS:  # "solar freezer in lagos" → "solar freezer"
+                break
+            words.append(w)
+        phrase = " ".join(w for w in words if w not in STOP)
         if phrase and len(phrase) > 2 and phrase not in objects:
             objects.append(phrase)
     return {
