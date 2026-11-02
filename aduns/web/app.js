@@ -14,7 +14,7 @@ document.querySelectorAll("#tabs button").forEach((b) => b.addEventListener("cli
 function showTab(name) {
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.id === name));
-  ({ opportunities: loadOpps, coverage: loadCoverage, overview: loadOverview, hypotheses: loadHypotheses, signals: loadSignals, capabilities: loadCaps, field: loadField, runs: loadRuns }[name] || (() => {}))();
+  ({ governance: loadGov, opportunities: loadOpps, coverage: loadCoverage, overview: loadOverview, hypotheses: loadHypotheses, signals: loadSignals, capabilities: loadCaps, field: loadField, runs: loadRuns }[name] || (() => {}))();
   try { localStorage.setItem("aduns.tab", name); } catch (_) {}
 }
 
@@ -232,4 +232,49 @@ async function openOpp(id) {
       <p><b>Validate first:</b> ${esc((E.validation_priorities || []).join(", ") || "—")}</p>` : `<p class="bad">${esc((E.missing || []).join(", "))} missing — ${esc(E.next_step || "")}</p>`}
     <h3>Defensibility (score ${D.score}, imitation risk ${D.imitation_risk})</h3>
     <p>${Object.entries(D.factors || {}).map(([k, v]) => `<span class="chip">${esc(k)} ${v}</span>`).join("")}</p><ul>${(D.notes || []).map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`;
+}
+
+
+// ---------------------------------------------------------------- governance
+const SEVC = { blocker: "bad", high: "bad", medium: "", info: "muted" };
+const RECC = { reject: "bad", conditional_pilot: "", approve_pilot: "ok" };
+async function loadGov() {
+  const [rows, chain] = await Promise.all([api("/api/governance"), api("/api/ledger/verify")]);
+  $("#chainBox").innerHTML = chain.intact ? `<span class="ok">Intact</span> · ${chain.entries} hash-chained entries · head ${esc((chain.head || "").slice(0, 16))}…`
+    : `<span class="bad">BROKEN at entry ${chain.broken_at}</span>`;
+  $("#govList").innerHTML = rows.map((r) => `<div class="item" data-id="${r.opportunity_id}"><div class="t">${esc(r.object)} · ${esc(r.country)}</div>
+    <div class="m"><b class="${RECC[r.recommendation] || ""}">${esc(r.recommendation)}</b> · status ${esc(r.status)} · ${ago(r.at)}</div></div>`).join("") || '<p class="muted">No reviews yet.</p>';
+  $("#govList").querySelectorAll(".item").forEach((el) => el.addEventListener("click", () => openGov(+el.dataset.id)));
+}
+async function openGov(oid) {
+  document.querySelectorAll("#govList .item").forEach((el) => el.classList.toggle("sel", +el.dataset.id === oid));
+  const g = await api(`/api/governance/${oid}`);
+  const V = g.verification || {}, L = g.legal || {}, R = g.red_team || {}, I = g.impact || {};
+  $("#govDetail").innerHTML = `
+    <h2>${esc(g.opportunity.object)} · ${esc(g.opportunity.country)} — <span class="${RECC[g.recommendation] || ""}">${esc(g.recommendation)}</span></h2>
+    <p class="muted">Dossier sha256 ${esc(g.dossier_sha256)} · ledger entry #${g.ledger_id}</p>
+    <h3>Verification (score ${V.score})</h3>
+    <table class="tbl"><thead><tr><th>Claim</th><th>Status</th><th>Basis</th></tr></thead><tbody>
+    ${(V.claims || []).map((c) => `<tr><td>${esc(c.claim)}</td><td><b>${esc(c.status)}</b></td><td class="muted">${esc(c.basis)}</td></tr>`).join("")}</tbody></table>
+    <p class="muted">${V.independent_evidence} independent items, ${V.syndicated_merged} syndicated copies merged, ${V.links_checked} links checked, ${(V.dead_links || []).length} dead.</p>
+    <h3>Legal &amp; Safety (worst: ${esc(L.worst_severity)}) — ${(L.parties_screened || []).length} counterparties screened, ${(L.screening_hits || []).length} hits</h3>
+    <ul>${(L.flags || []).map((f) => `<li class="${SEVC[f.severity]}"><b>[${esc(f.severity)}] ${esc(f.area)}</b>: ${esc(f.finding)} ${f.source ? link(f.source, "source") : ""}</li>`).join("")}</ul>
+    <h3>Red Team — verdict: ${esc(R.verdict)}</h3>
+    ${R.stress_test ? `<p>Stress test: P(profitable) ${pct(R.stress_test.p_profitable)}, net margin p50 ${pct(R.stress_test.net_margin_p50)} <span class="muted">(${esc(R.stress_test.method)})</span></p>` : ""}
+    <ul>${(R.failure_modes || []).map((m) => `<li class="${m.severity === "high" ? "bad" : ""}"><b>${esc(m.failure_mode)}</b>: ${esc(m.argument)}
+      ${(m.evidence || []).length ? `<ul>${m.evidence.map((e) => `<li>${link(e.url, e.title)} ${e.title_en && e.title_en !== e.title ? `<span class="muted">(${esc(e.title_en)})</span>` : ""} ${esc(e.date || "")}</li>`).join("")}</ul>` : ""}</li>`).join("")}</ul>
+    <p><b>Kill criteria</b></p><ol>${(R.kill_criteria || []).map((k) => `<li>${esc(k)}</li>`).join("")}</ol>
+    <h3>Impact (score ${I.score}) · SDGs ${esc((I.sdgs || []).join(", "))} · local value capture ${I.local_value_capture}</h3>
+    <p>Beneficiaries (mentions): ${Object.entries(I.beneficiaries || {}).map(([k, v]) => `<span class="chip">${esc(k)} ${v}</span>`).join("") || "—"}</p>
+    <ul>${(I.potential_harms || []).map((h) => `<li>${esc(h.harm)} <span class="muted">→ ${esc(h.mitigation)}</span></li>`).join("")}</ul>
+    <h3>Conditions (${(g.conditions || []).length})</h3><ol>${(g.conditions || []).map((c) => `<li>${esc(c)}</li>`).join("")}</ol>
+    <h3>Human approval gate (required before Execution)</h3>
+    ${(g.approvals || []).map((a) => `<p><b>${esc(a.decision)}</b> by ${esc(a.approver)} ${ago(a.at)} ${a.conditions ? "— " + esc(a.conditions) : ""}</p>`).join("") || '<p class="muted">No human decision yet.</p>'}
+    <div class="toolbar"><button data-ap="approved" class="primary">Approve pilot</button><button data-ap="approved_with_conditions">Approve with conditions</button><button data-ap="rejected">Reject</button></div>`;
+  $("#govDetail").querySelectorAll("[data-ap]").forEach((b) => b.addEventListener("click", async () => {
+    const approver = prompt("Your full name (recorded in the tamper-evident ledger)"); if (!approver) return;
+    const conditions = b.dataset.ap === "approved" ? "" : (prompt("Conditions / reason") || "");
+    await api(`/api/governance/${oid}/approve`, { method: "POST", body: JSON.stringify({ approver, decision: b.dataset.ap, conditions }) });
+    openGov(oid); loadGov();
+  }));
 }

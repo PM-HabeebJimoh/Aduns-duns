@@ -113,7 +113,23 @@ For each strong hypothesis and target country, six agents design how to deliver 
 The 24/7 loop designs up to two opportunities per cycle (validated hypotheses first) and refreshes them every 3 days.
 They appear in the dashboard's **Opportunities** tab and at `/api/opportunities`.
 
+## Layer 3 — Governance (`aduns/agents/governance.py`)
+
+Before any money or reputation is committed, every designed opportunity faces a deliberately adversarial board:
+
+| Agent | What it checks (real data) |
+|---|---|
+| **Verification** | Sorts each key claim (need exists, market size, local price, unit cost, profitability, analogies) into confirmed, corroborated, single-source, claim, assumption or missing. Counts *independent* evidence by merging syndicated or near-identical copies and counting distinct publishing domains, authors and layers. Checks a sample of evidence links for dead pages, and counts validated field observations. |
+| **Legal & Safety** | Screens every counterparty (suppliers, holders, incumbents, organisations) against the **US Consolidated Screening List**: 26k entities from OFAC SDN, BIS Entity and Denied Persons lists, ITAR and CMIC, refreshed daily. Matching uses normalised exact and token-set rules, and generic words like "gas" or "world" never match on their own. Also checks the target and supplier countries against OFAC country programs (comprehensive, sectoral or list-based), export-controlled HS codes, the licences a domain needs, and **product recalls** in the last year (openFDA food/drug/device, CPSC), plus privacy jurisdiction (GDPR) and competition-law notes. |
+| **Red Team** | Tries to prove the business fails. It **searches for counter-evidence** (surplus, glut, prices falling) in the country's own news, in its language and translated, and keeps only items from that country's edition or naming the country. It **stress-tests** the economics with every assumption at its unfavourable end, and flags unverified tariffs, supply concentration, incumbent strength, single-source or search-only demand, assumption-driven economics, unverified claims, legal issues and rejected field observations. Writes explicit **kill criteria**. Verdict: kill, pilot only with conditions, or proceed to pilot. |
+| **Impact** | Beneficiary groups named in the evidence; potential harms (displacing incumbents, undercutting local producers, environmental risk by HS chapter, profiteering optics) with mitigations; local value capture by route; SDG mapping. |
+| **Audit** | A **hash-chained, tamper-evident ledger** (any edit breaks verification at the edited entry), a sealed SHA-256 evidence **dossier** per review (every signal, capability, input provenance, agent run, human review and field observation), and the **human approval gate**: Execution requires a named person's approve, approve-with-conditions or reject decision, recorded in the chain. Overriding a "reject" recommendation is recorded as an override. |
+
+The **Governance Board** issues the most cautious recommendation the evidence supports (reject, conditional pilot or
+approve pilot), with a numbered list of conditions. The 24/7 loop reviews new or updated opportunities each cycle.
+Dashboard: **Governance** tab. API: `/api/governance`, `/api/governance/{id}`, `/api/governance/{id}/approve`,
+`/api/ledger/verify`.
+
 ## Roadmap (next layers)
-3. Governance: verification, legal & safety, red team, impact, audit.
 4. Execution: experiments, partnerships, operations, customers, finance, expansion.
 5. Learning from real outcomes.

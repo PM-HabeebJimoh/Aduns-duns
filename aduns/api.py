@@ -562,3 +562,61 @@ def opportunity(oid: int):
     if not o:
         raise HTTPException(404)
     return _opp(o, True)
+
+
+
+# ----------------------------------------------------------------- governance (layer 3)
+from .agents import governance as G  # noqa: E402
+
+
+@app.post("/api/agents/governance-board")
+def governance_run(req: dict):
+    return _job("governance_board", G.GovernanceBoard().run, opportunity_id=int(req["opportunity_id"]))
+
+
+@app.get("/api/governance")
+def governance_list():
+    G._chain_tables()
+    rows = db.q("""SELECT g.id, g.opportunity_id, g.at, g.recommendation, g.dossier_sha256, o.object, o.country,
+                   o.status, o.opportunity_score FROM governance_reviews g JOIN opportunities o ON o.id=g.opportunity_id
+                   WHERE g.id IN (SELECT MAX(id) FROM governance_reviews GROUP BY opportunity_id) ORDER BY g.at DESC""")
+    return rows
+
+
+@app.get("/api/governance/{opportunity_id}")
+def governance_detail(opportunity_id: int):
+    G._chain_tables()
+    r = db.q1("SELECT * FROM governance_reviews WHERE opportunity_id=? ORDER BY id DESC LIMIT 1", (opportunity_id,))
+    if not r:
+        raise HTTPException(404, "no governance review yet")
+    for k in ("verification", "legal", "red_team", "impact", "conditions"):
+        r[k] = db.loads(r[k], {})
+    r["approvals"] = db.q("SELECT * FROM approvals WHERE opportunity_id=? ORDER BY id DESC", (opportunity_id,))
+    o = db.q1("SELECT object, country, best_route, status FROM opportunities WHERE id=?", (opportunity_id,))
+    r["opportunity"] = o
+    return r
+
+
+class ApprovalReq(BaseModel):
+    approver: str
+    decision: str          # approved | approved_with_conditions | rejected
+    conditions: str = ""
+
+
+@app.post("/api/governance/{opportunity_id}/approve")
+def governance_approve(opportunity_id: int, req: ApprovalReq):
+    try:
+        return G.approve(opportunity_id, req.approver, req.decision, req.conditions)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/ledger/verify")
+def ledger_verify():
+    return G.verify_chain()
+
+
+@app.get("/api/ledger/chain")
+def ledger_chain(limit: int = 200):
+    G._chain_tables()
+    return db.q("SELECT * FROM ledger_chain ORDER BY id DESC LIMIT ?", (limit,))

@@ -117,6 +117,7 @@ class Daemon:
 
         report["downstream"] = self.downstream()
         report["designed"] = self.design_opportunities()
+        report["governed"] = self.govern()
         from . import alerts
         report["alerts"] = len(alerts.check())
         report["translated_backfill"] = self.backfill_translations()
@@ -167,6 +168,22 @@ class Daemon:
             _set("step", f"designing opportunity for hypothesis #{r['id']}")
             res = OpportunityDesigner().run(hypothesis_id=r["id"])
             out.append({"hypothesis": r["id"], **{k: res["stats"].get(k) for k in ("best_route", "score", "p_profitable")}})
+        return out
+
+    def govern(self, per_cycle: int = 2) -> list[dict]:
+        """Layer 3: Governance Board for opportunities designed/updated since their last review."""
+        from .agents.governance import GovernanceBoard, _chain_tables
+        _chain_tables()
+        rows = db.q("""SELECT o.id FROM opportunities o WHERE o.status NOT LIKE 'human:%' AND NOT EXISTS
+                       (SELECT 1 FROM governance_reviews g WHERE g.opportunity_id=o.id AND g.at >= o.updated_at - 1)
+                       ORDER BY o.opportunity_score DESC LIMIT ?""", (per_cycle,))
+        out = []
+        for r in rows:
+            if self.stopped():
+                break
+            _set("step", f"governance review of opportunity #{r['id']}")
+            res = GovernanceBoard().run(opportunity_id=r["id"])
+            out.append({"opportunity": r["id"], "recommendation": res["stats"].get("recommendation")})
         return out
 
     @staticmethod
