@@ -57,6 +57,10 @@ async function loadCoverage() {
     cycle ${esc(v("cycle") ?? "—")} · heartbeat ${ago(v("heartbeat"))} · now: ${esc(v("step") || "—")}<br>
     Last cycle swept: ${esc((lc.countries || []).join(", ") || "—")} · fusion: ${esc(JSON.stringify(lc.fusion || {}))}
     ${v("last_error") ? `<div class="bad">Last error: ${esc(String(v("last_error")).slice(0, 300))}</div>` : ""}`;
+  try {
+    const w = await api("/api/workers");
+    $("#daemonBox").innerHTML += `<br>Remote workers: ${w.workers.length ? w.workers.map((x) => `${esc(x.id)} (${x.sweeps} sweeps, ${x.signals} signals, seen ${ago(x.last_seen)})`).join("; ") : "none"} · active leases: ${esc(w.leases.map((l) => l.country).join(", ") || "—")}`;
+  } catch (_) {}
   $("#contKpis").innerHTML = Object.entries(cov).map(([c, x]) => `<div class="kpi"><b>${x.signals.toLocaleString()}</b><span>${esc(c)} · ${x.swept}/${x.countries} countries swept</span></div>`).join("");
   $("#contTables").innerHTML = Object.entries(cov).map(([c, x]) => `<div class="card"><h2>${esc(c)}</h2>
     <table class="tbl"><thead><tr><th>Country</th><th>Signals (recent)</th><th>Sources</th><th>Hypotheses</th><th>Last sweep</th><th>Working sources</th><th>Failed</th></tr></thead><tbody>
@@ -69,12 +73,14 @@ $("#dStop").addEventListener("click", async () => { await api("/api/daemon/stop"
 // ---------------------------------------------------------------- hypotheses
 $("#hypDomain").addEventListener("change", loadHypotheses);
 $("#hypMin").addEventListener("change", loadHypotheses);
+$("#hypEmerging").addEventListener("change", loadHypotheses);
+$("#hypCont").addEventListener("change", loadHypotheses);
 $("#refuseBtn").addEventListener("click", async () => { const { job_id } = await api("/api/agents/signal-fusion", { method: "POST", body: "{}" }); setTimeout(loadHypotheses, 4000); });
 async function loadHypotheses() {
-  const rows = await api(`/api/hypotheses?domain=${encodeURIComponent($("#hypDomain").value)}&min_signals=${$("#hypMin").value || 1}`);
+  const rows = await api(`/api/hypotheses?domain=${encodeURIComponent($("#hypDomain").value)}&min_signals=${$("#hypMin").value || 1}&emerging=${$("#hypEmerging").checked}&continent=${encodeURIComponent($("#hypCont").value)}`);
   $("#hypList").innerHTML = rows.map((h) => `<div class="item" data-id="${h.id}"><div class="t">${esc(h.title)}</div>
     <div class="m"><span class="score">${h.score.toFixed(2)}</span> · ${h.signal_count} signals · ${h.source_count} sources · ${h.layer_count} layers
-    <span class="chip ev-${h.evidence_level}">${h.evidence_level.replace("_", " ")}</span> <span class="chip">${esc(h.domain || "—")}</span> <span class="chip">${esc(h.scope || "")}</span> <span class="chip">${esc(h.status)}</span></div></div>`).join("")
+    <span class="chip ev-${h.evidence_level}">${h.evidence_level.replace("_", " ")}</span> <span class="chip">${esc(h.domain || "—")}</span> <span class="chip">${esc(h.scope || "")}</span> <span class="chip">${esc(h.status)}</span>${h.emerging ? ' <span class="chip ev-field_verified">emerging</span>' : ""}</div></div>`).join("")
     || '<p class="muted">No hypotheses yet.</p>';
   $("#hypList").querySelectorAll(".item").forEach((el) => el.addEventListener("click", () => openHyp(+el.dataset.id)));
 }
@@ -92,6 +98,8 @@ async function openHyp(id) {
     <h3>Geography</h3>${kv(h.countries) || '<span class="muted">none detected</span>'} ${kv(h.continents)}
     <h3>Need types · Gap causes (why the gap exists)</h3>${kv(h.need_types)} ${kv(h.gap_causes)}
     <h3>Falsification tests</h3><ol class="guide">${(h.tests || []).map((t) => `<li>${esc(t)}</li>`).join("")}</ol>
+    <div class="toolbar"><b>Review:</b> <button data-rev="confirmed" class="primary">Confirm real need</button><button data-rev="duplicate">Duplicate</button><button data-rev="noise">Noise</button><button data-rev="rejected">Reject</button>
+      ${h.momentum ? `<span class="chip">momentum ${(+h.momentum).toFixed(1)}×</span>` : ""}${h.emerging ? '<span class="chip ev-field_verified">EMERGING</span>' : ""}</div>
     <div class="toolbar"><button data-act="cap">Find capabilities</button><button data-act="ana">Find cross-border analogies</button><button data-act="mis">Draft field mission</button><span id="actMsg" class="muted"></span></div>
     <h3>Evidence (${h.signals.length} real signals)</h3>
     ${h.signals.slice(0, 60).map((s) => `<div class="sig layer-${esc(s.layer)}"><div>${esc(s.text.slice(0, 380))}</div>${s.text_en && s.text_en !== s.text ? `<div class="muted">EN: ${esc(s.text_en.slice(0, 260))}</div>` : ""}
@@ -103,6 +111,12 @@ async function openHyp(id) {
     <table class="tbl"><thead><tr><th>Analog</th><th>Measure</th><th>Target pressure</th><th>Analog pressure</th><th>Method</th><th>Same income</th><th>Score</th><th>How they did it (evidence)</th></tr></thead><tbody>
     ${h.analogies.map((a) => `<tr><td>${esc(a.analog_name)}</td><td>${esc(a.indicator_name)}</td><td>${(+a.target_value).toFixed(2)}</td><td>${(+a.analog_value).toFixed(2)}</td><td>${esc(a.method || "")}</td><td>${(+a.income_similarity).toFixed(2)}</td><td>${(+a.deviance_score).toFixed(2)}</td><td>${(a.evidence || []).map((e) => link(e.url, e.title)).join("<br>")}</td></tr>`).join("")}</tbody></table>
     <h3>Field missions</h3>${h.missions.map(missionHtml).join("") || '<p class="muted">None yet.</p>'}`;
+  $("#hypDetail").querySelectorAll("[data-rev]").forEach((b) => b.addEventListener("click", async () => {
+    const reviewer = prompt("Your name (recorded in the audit log)"); if (!reviewer) return;
+    const reason = prompt("Reason (optional)") || "";
+    await api(`/api/hypotheses/${id}/review`, { method: "POST", body: JSON.stringify({ verdict: b.dataset.rev, reviewer, reason }) });
+    loadHypotheses(); openHyp(id);
+  }));
   $("#hypDetail").querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", async () => {
     const act = b.dataset.act; $("#actMsg").textContent = "running…";
     try {

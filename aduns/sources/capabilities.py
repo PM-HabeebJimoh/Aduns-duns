@@ -289,11 +289,14 @@ def _social():
 
 def local_apps(query: str, iso2: str, limit: int = 5) -> list[dict]:
     """Digital solutions already serving this need inside a given country (Google Play, country storefront)."""
+    return http.cached(f"localapps:{query}:{iso2}:{limit}", 24 * 3600, lambda: _local_apps(query, iso2, limit))
+
+
+def _local_apps(query: str, iso2: str, limit: int) -> list[dict]:
     S = _social()
     out = []
     for app_id in S.play_search(query, iso2, "en", limit):
-        body = http.fetch("https://play.google.com/store/apps/details", {"id": app_id, "hl": "en", "gl": iso2.upper()},
-                          source="googleplay", ttl=24 * 3600, expect="text", headers={"User-Agent": S.BROWSER_UA})
+        body = S.play_app_page(app_id, iso2, "en")
         import html as _h
         import re as _re
         t = _re.search(r'<meta property="og:title" content="([^"]+)"', body)

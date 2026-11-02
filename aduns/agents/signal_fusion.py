@@ -204,6 +204,19 @@ class SignalFusionAgent(Agent):
         total = sum(WEIGHTS[k] * v for k, v in parts.items())
         # Single-source clusters are claims, not corroborated markets: dampen them.
         total *= 0.6 + 0.4 * min(1.0, (len(sources) - 1) / 2)
+        # Momentum: evidence in the last 7 days vs the 7 days before (emerging needs accelerate).
+        ts_all = [m.get("published_ts") or _parse_date(m.get("published_at")) for m in members]
+        r7 = sum(1 for t in ts_all if t and t >= now - 7 * 86400)
+        p7 = sum(1 for t in ts_all if t and now - 14 * 86400 <= t < now - 7 * 86400)
+        momentum = (r7 + 1) / (p7 + 1)
+        parts["momentum"] = momentum
+        parts["recent_7d"] = r7
+        total *= 1 + 0.08 * min(math.log2(momentum), 2) if momentum > 1 else 1
+        # Learned reliability of this evidence from human reviews (0.5 = neutral → factor 1.0).
+        from .. import learning
+        rel = learning.reliability(members)
+        parts["learned_reliability"] = rel
+        total *= 0.5 + rel
         return round(total, 4), {k: round(v, 3) for k, v in parts.items()}
 
     @staticmethod
@@ -274,6 +287,8 @@ class SignalFusionAgent(Agent):
             "need_types": json.dumps(dict(types)), "gap_causes": json.dumps(dict(causes)),
             "signal_count": len(members), "source_count": len(sources), "layer_count": len(layers),
             "score": score, "score_breakdown": json.dumps(breakdown), "evidence_level": evidence,
+            "momentum": breakdown.get("momentum"),
+            "emerging": int(breakdown.get("momentum", 1) >= 2 and breakdown.get("recent_7d", 0) >= 3),
             "tests": json.dumps(tests), "updated_at": time.time(),
             "continents": json.dumps(dict(continents)), "scope": scope,
         }

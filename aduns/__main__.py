@@ -41,6 +41,10 @@ def main() -> None:
     sw = sub.add_parser("sweep", help="sweep one country in its own languages")
     sw.add_argument("--country", required=True)
     sub.add_parser("selftest", help="live check of every data source")
+    wk = sub.add_parser("worker", help="remote sweep worker: lease countries from a central server, upload signals")
+    wk.add_argument("--server", required=True); wk.add_argument("--token", default="")
+    wk.add_argument("--per-continent", type=int, default=1); wk.add_argument("--rounds", type=int, default=None)
+    dm.add_argument("--no-sense", action="store_true", help="central mode: only fuse/downstream (workers sense)")
     sub.add_parser("coverage", help="signals per continent / country")
     args = p.parse_args()
     if args.cmd == "selftest":
@@ -48,7 +52,14 @@ def main() -> None:
         raise SystemExit(1 if selftest.run() else 0)
     if args.cmd == "daemon":
         from .scheduler import Daemon
-        Daemon(parallel_countries=args.parallel, downstream_per_cycle=args.downstream).run_forever(args.cycles)
+        Daemon(parallel_countries=args.parallel, downstream_per_cycle=args.downstream,
+               sense_locally=not args.no_sense).run_forever(args.cycles)
+        return
+    if args.cmd == "worker":
+        import os
+        from . import worker
+        worker.run(args.server.rstrip("/"), args.token or os.environ.get("ADUNS_WORKER_TOKEN", ""),
+                   per_continent=args.per_continent, max_rounds=args.rounds)
         return
     if args.cmd == "coverage":
         from .scheduler import coverage

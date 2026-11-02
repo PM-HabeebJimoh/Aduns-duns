@@ -16,6 +16,8 @@ Stop by calling Daemon.stop() or creating the file data/STOP.
 from __future__ import annotations
 
 import json
+import os
+import socket
 import threading
 import time
 import traceback
@@ -38,7 +40,8 @@ def state() -> dict:
 
 class Daemon:
     def __init__(self, parallel_countries: int = 2, downstream_per_cycle: int = 3, global_every_s: int = 3600,
-                 fusion_window_days: int = 30, mission_min_score: float = 0.3):
+                 fusion_window_days: int = 30, mission_min_score: float = 0.3, worker_id: str | None = None,
+                 sense_locally: bool = True):
         self.parallel = parallel_countries
         self.downstream_per_cycle = downstream_per_cycle
         self.global_every_s = global_every_s
@@ -46,6 +49,8 @@ class Daemon:
         self.mission_min_score = mission_min_score
         self._stop = threading.Event()
         self.cycle_no = 0
+        self.worker_id = worker_id or f"local:{socket.gethostname()}:{os.getpid()}"
+        self.sense_locally = sense_locally
 
     # ---------------------------------------------------------------- control
     def stop(self) -> None:
@@ -68,14 +73,7 @@ class Daemon:
 
     # ------------------------------------------------------------------ cycle
     def next_countries(self) -> list[str]:
-        last = {r["country"]: r["last_finished"] or 0 for r in db.q("SELECT country, last_finished FROM sweeps")}
-        picks = []
-        for cont, members in geo.by_continent().items():
-            if not members:
-                continue
-            # least recently swept first; among never-swept, the most urbanised/populous first
-            picks.append(min(members, key=lambda m: (last.get(m, 0), -len(geo.country(m)["cities"]), m)))
-        return picks
+        return lease_countries(self.worker_id, per_continent=1)
 
     def cycle(self) -> dict:
         self.cycle_no += 1
@@ -83,14 +81,17 @@ class Daemon:
         _set("heartbeat", time.time())
         _set("cycle", self.cycle_no)
 
-        countries = self.next_countries()
+        countries = self.next_countries() if self.sense_locally else []
         report["countries"] = countries
         _set("step", f"sensing {', '.join(countries)}")
 
         def sweep(iso):
             if self.stopped():
                 return iso, {"status": "skipped"}
-            r = NeedSensingAgent().run(country=iso)
+            try:
+                r = NeedSensingAgent().run(country=iso)
+            finally:
+                release(self.worker_id, iso)
             return iso, {"status": r["status"], "stored": r["stats"].get("signals_stored", 0)}
         with ThreadPoolExecutor(max_workers=self.parallel) as ex:
             report["sweeps"] = dict(ex.map(sweep, countries))
@@ -111,7 +112,14 @@ class Daemon:
                                                            "superseded", "signals_considered")}
 
         report["downstream"] = self.downstream()
+        from . import alerts
+        report["alerts"] = len(alerts.check())
         report["translated_backfill"] = self.backfill_translations()
+        from . import http as _http
+        last_prune = float((state().get("last_prune") or {}).get("value") or 0)
+        if time.time() - last_prune > 86400:
+            report["cache_pruned"] = _http.prune_cache(vacuum=True)
+            _set("last_prune", time.time())
         report["finished"] = time.time()
         _set("last_cycle", report)
         _set("heartbeat", time.time())
@@ -120,7 +128,7 @@ class Daemon:
     def downstream(self) -> list[dict]:
         """Capabilities + analogies + field mission for the strongest hypotheses not processed in 24h."""
         rows = db.q("""SELECT id, score, countries, scope FROM hypotheses
-                       WHERE status NOT IN ('superseded', 'stale') AND signal_count >= 2 AND countries != '{}'
+                       WHERE status NOT IN ('superseded', 'stale', 'rejected') AND signal_count >= 2 AND countries != '{}'
                        AND (processed_at IS NULL OR processed_at < ?) ORDER BY score DESC LIMIT ?""",
                     (time.time() - 86400, self.downstream_per_cycle))
         done = []
@@ -202,3 +210,62 @@ def coverage() -> dict:
         out[cont] = {"countries": len(members), "swept": sum(1 for r in rows if r["sweeps"]),
                      "signals": sum(r["signals"] for r in rows), "rows": rows}
     return out
+
+
+
+# ------------------------------------------------------------------ leases (distributed workers)
+def lease_countries(owner: str, per_continent: int = 1, ttl: int = 1800) -> list[str]:
+    """Atomically lease the least-recently-swept, unleased countries — `per_continent` on every continent.
+
+    Local daemons and remote workers share this, so any number of machines (on different IPs, each with its own
+    rate-limit budget) can sweep the world together without duplicating work and with equal continent coverage."""
+    now = time.time()
+    picks: list[str] = []
+    with db.tx() as conn:
+        last = {r[0]: r[1] or 0 for r in conn.execute("SELECT country, last_finished FROM sweeps").fetchall()}
+        busy = {r[0] for r in conn.execute("SELECT country FROM leases WHERE until > ? AND owner != ?", (now, owner))}
+        for cont, members in geo.by_continent().items():
+            free = [m for m in members if m not in busy]
+            free.sort(key=lambda m: (last.get(m, 0), -len(geo.country(m)["cities"]), m))
+            for iso in free[:per_continent]:
+                conn.execute("INSERT OR REPLACE INTO leases (country, owner, until) VALUES (?,?,?)", (iso, owner, now + ttl))
+                picks.append(iso)
+    return picks
+
+
+def release(owner: str, country: str) -> None:
+    db.execute("DELETE FROM leases WHERE country=? AND owner=?", (country, owner))
+
+
+def ingest_worker_report(worker_id: str, country: str, signals: list[dict], registry: list[dict], stats: dict,
+                         address: str = "") -> dict:
+    """Store a remote worker's sweep results centrally (dedup by content hash)."""
+    cols = {r["name"] for r in db.q("PRAGMA table_info(signals)")} - {"id", "run_id"}
+    stored = 0
+    for s in signals:
+        row = {k: v for k, v in s.items() if k in cols}
+        if not row.get("content_hash") or not row.get("text"):
+            continue
+        row["extra"] = row.get("extra") if isinstance(row.get("extra"), str) else json.dumps(row.get("extra") or {})
+        if db.insert("signals", row, ignore=True):
+            stored += 1
+    for r in registry:
+        db.insert("source_registry", {"kind": r["kind"], "handle": r["handle"], "country": r.get("country"),
+                                      "discovered_from": f"worker:{worker_id}:{r.get('discovered_from', '')}"[:200],
+                                      "discovered_at": time.time()}, ignore=True)
+    c = geo.country(country)
+    with db.tx() as conn:
+        conn.execute("""INSERT INTO sweeps (country, continent, last_started, last_finished, runs, signals_last, signals_total,
+                        sources_ok, sources_failed) VALUES (?,?,?,?,1,?,?,?,?)
+                        ON CONFLICT(country) DO UPDATE SET last_finished=excluded.last_finished, runs=runs+1,
+                        signals_last=excluded.signals_last, signals_total=signals_total+excluded.signals_last,
+                        sources_ok=excluded.sources_ok, sources_failed=excluded.sources_failed""",
+                     (country, c["continent"] if c else None, time.time(), time.time(), stored, stored,
+                      json.dumps(stats.get("sources_ok", [])), json.dumps(stats.get("sources_failed", []))))
+        conn.execute("""INSERT INTO workers (id, last_seen, sweeps, signals, address) VALUES (?,?,1,?,?)
+                        ON CONFLICT(id) DO UPDATE SET last_seen=excluded.last_seen, sweeps=sweeps+1,
+                        signals=signals+excluded.signals, address=excluded.address""",
+                     (worker_id, time.time(), stored, address))
+    release(worker_id, country)
+    db.audit(worker_id, "worker_report", "sweep", None, {"country": country, "stored": stored, "received": len(signals)})
+    return {"stored": stored, "received": len(signals)}

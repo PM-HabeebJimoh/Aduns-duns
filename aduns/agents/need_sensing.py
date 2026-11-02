@@ -25,6 +25,8 @@ from datetime import datetime, timezone
 
 from .. import config, db, geo, http, lexicon, nlp, taxonomy, translate
 from ..sources import institutional as I
+from ..sources import procurement as P
+from ..sources import seeds
 from ..sources import needs as legacy
 from ..sources import social as S
 from ..sources import worldbank
@@ -32,10 +34,11 @@ from .base import Agent
 
 GLOBAL_SOURCES = ["gdacs", "fda", "cfpb", "samgov", "prozorro", "secop", "hackernews"]
 COUNTRY_SOURCES = ["trends", "autocomplete", "news", "bluesky", "youtube", "reddit", "telegram", "mastodon", "lemmy",
-                   "gdelt", "googleplay", "wfp", "wb_procurement"]
+                   "gdelt", "googleplay", "wfp", "wb_procurement", "local_channels", "procurement"]
+INSTITUTIONAL = ("prozorro", "secop", "samgov", "worldbank_procurement", "ted", "pncp", "findatender")
 NO_QUERY_SOURCES = {"googletrends", "reddit", "telegram", "gdacs", "prozorro", "secop", "wfp_prices", "openfda",
                     "worldbank_procurement", "cfpb", "samgov"}
-ALWAYS_NEED = {"wfp_prices", "prozorro", "secop", "openfda", "samgov", "gdacs"}
+ALWAYS_NEED = {"wfp_prices", "prozorro", "secop", "openfda", "samgov", "gdacs", "ted", "pncp", "findatender"}
 SUBREDDIT_RE = re.compile(r"(?<![\w/])r/([A-Za-z0-9_]{3,21})\b")
 
 
@@ -138,6 +141,16 @@ class NeedSensingAgent(Agent):
         if "reddit" in srcs:
             for sub in self._subreddits(c):
                 add(f"reddit:{sub}", lambda sub=sub: S.reddit_subreddit(sub), primary)
+        if "local_channels" in srcs:
+            # Wikidata seeds this country's own media/agency channels (Telegram, YouTube, subreddits) once a month.
+            seeded = self.safe("wikidata_seeds", lambda: seeds.seed_country(iso3), {}) or {}
+            if seeded and not seeded.get("skipped"):
+                self.stats["seeded"] = seeded
+            for ch in db.q("SELECT handle FROM source_registry WHERE kind='youtube_channel' AND country=? AND active=1 "
+                           "ORDER BY COALESCE(last_crawled,0) LIMIT ?", (iso3, 4 * depth)):
+                add(f"youtube_channel:{ch['handle']}", lambda h=ch["handle"]: seeds.youtube_channel_feed(h), primary)
+                db.execute("UPDATE source_registry SET last_crawled=? WHERE kind='youtube_channel' AND handle=?",
+                           (time.time(), ch["handle"]))
         if "telegram" in srcs:
             for ch in db.q("SELECT handle FROM source_registry WHERE kind='telegram' AND country=? AND active=1 "
                            "ORDER BY COALESCE(last_crawled,0) LIMIT ?", (iso3, 4 * depth)):
@@ -173,6 +186,13 @@ class NeedSensingAgent(Agent):
             add("wfp_prices", lambda: I.wfp_price_spikes(name, iso3), "en")
         if "wb_procurement" in srcs:
             add("worldbank_procurement", lambda: I.worldbank_procurement(c["name"], 30), "en")
+        if "procurement" in srcs:
+            if c["continent"] == "Europe" and iso3 not in ("RUS", "BLR", "UKR"):
+                add("ted", lambda: [r for r in P.ted_no_winner(21, 2, iso3)], c["langs"][0] if c["langs"] else "en")
+            if iso3 == "BRA":
+                add("pncp", lambda: P.pncp_failed(7, 4), "pt")
+            if iso3 == "GBR":
+                add("findatender", lambda: P.uk_cancelled(30, 100), "en")
         if iso3 == "UKR":
             add("prozorro", lambda: I.prozorro_failed(3), "uk")
         if iso3 == "COL":
@@ -203,7 +223,8 @@ class NeedSensingAgent(Agent):
         cands = {base.replace(" ", ""), base.replace(" ", "_")}
         if c["capital"]:
             cands.add(c["capital"].replace(" ", ""))
-        known = db.q("SELECT handle FROM source_registry WHERE kind='subreddit' AND country=? AND active=1", (c["iso3"],))
+        known = db.q("SELECT handle FROM source_registry WHERE kind='subreddit' AND country=? AND active=1 "
+                     "ORDER BY COALESCE(last_crawled,0) LIMIT 4", (c["iso3"],))
         out = list(dict.fromkeys([k["handle"] for k in known] + sorted(cands)))
         return out[:4]
 
@@ -297,7 +318,7 @@ class NeedSensingAgent(Agent):
                     need_score = max(need_score, 0.5 if priced else 0.4)
                 elif "{x}" not in tpl:
                     need_score = min(need_score, 0.2)
-            if src in ("prozorro", "secop", "samgov", "worldbank_procurement"):
+            if src in INSTITUTIONAL:
                 types.setdefault("institutional", 0.7)
             if src == "googleplay" and (r.get("extra") or {}).get("rating", 5) <= 2:
                 types.setdefault("inefficient", 0.6)
@@ -310,7 +331,7 @@ class NeedSensingAgent(Agent):
             # tangible — a recognised need domain in the English text — or be backed by an English need phrase.
             dom = taxonomy.classify_domain(en or text)[0]
             if (not det_en["type_weights"] and not dom and src not in ALWAYS_NEED and src != "googleplay"
-                    and src not in ("prozorro", "secop", "worldbank_procurement", "googlesuggest")):
+                    and src not in INSTITUTIONAL and src != "googlesuggest"):
                 self.bump("dropped_vague")
                 continue
             if focus_toks and not (focus_toks & set(nlp.tokens(f"{en or ''} {text}"))):
@@ -338,7 +359,7 @@ class NeedSensingAgent(Agent):
             # countries wins (the item is attributed to where it is actually about).
             if scope and scope not in countries and (src in ("googletrends", "googlesuggest", "reddit", "telegram",
                                                              "googleplay", "wfp_prices", "worldbank_procurement",
-                                                             "prozorro", "secop") or not countries):
+                                                             *INSTITUTIONAL) or not countries):
                 countries.insert(0, scope)
             sig_scope = scope if scope in countries else (countries[0] if countries else None)
             cont = geo.country(sig_scope)["continent"] if sig_scope and geo.country(sig_scope) else None

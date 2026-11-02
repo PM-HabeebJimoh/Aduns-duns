@@ -206,10 +206,17 @@ def _hyp(r: dict) -> dict:
 
 
 @app.get("/api/hypotheses")
-def hypotheses(domain: str = "", status: str = "", min_signals: int = 1, limit: int = 100):
+def hypotheses(domain: str = "", status: str = "", min_signals: int = 1, limit: int = 100, emerging: bool = False,
+               continent: str = "", country: str = ""):
     where, params = ["signal_count >= ?"], [min_signals]
     if status != "all":
-        where.append("status NOT IN ('superseded', 'stale')")
+        where.append("status NOT IN ('superseded', 'stale', 'rejected')")
+    if emerging:
+        where.append("emerging = 1")
+    if continent:
+        where.append("continents LIKE ?"); params.append(f'%"{continent}"%')
+    if country:
+        where.append("countries LIKE ?"); params.append(f'%"{country.upper()}"%')
     if domain:
         where.append("domain = ?"); params.append(domain)
     if status and status != "all":
@@ -450,3 +457,68 @@ def api_daemon_stop():
 @app.get("/api/sources/registry")
 def api_registry():
     return db.q("SELECT * FROM source_registry ORDER BY discovered_at DESC LIMIT 500")
+
+
+
+# ----------------------------------------------------------------- remote workers
+class LeaseReq(BaseModel):
+    worker_id: str
+    per_continent: int = 1
+
+
+def _check_worker(request: Request):
+    import os
+    tok = os.environ.get("ADUNS_WORKER_TOKEN")
+    if not tok:
+        raise HTTPException(403, "Remote workers disabled: set ADUNS_WORKER_TOKEN on the central server")
+    if request.headers.get("X-Aduns-Token") != tok:
+        raise HTTPException(401, "bad worker token")
+
+
+@app.post("/api/worker/lease")
+def worker_lease(req: LeaseReq, request: Request):
+    _check_worker(request)
+    return {"countries": scheduler.lease_countries(req.worker_id, per_continent=max(1, min(req.per_continent, 3)))}
+
+
+@app.post("/api/worker/report")
+async def worker_report(request: Request):
+    _check_worker(request)
+    body = await request.json()
+    return scheduler.ingest_worker_report(body["worker_id"], body["country"], body.get("signals", []),
+                                          body.get("registry", []), body.get("stats", {}),
+                                          address=request.client.host if request.client else "")
+
+
+@app.get("/api/workers")
+def workers():
+    return {"workers": db.q("SELECT * FROM workers ORDER BY last_seen DESC"),
+            "leases": db.q("SELECT * FROM leases WHERE until > ?", (time.time(),))}
+
+
+
+# ----------------------------------------------------------------- review & learning
+class HypReview(BaseModel):
+    verdict: str          # confirmed | rejected | duplicate | noise
+    reviewer: str
+    reason: str = ""
+
+
+@app.post("/api/hypotheses/{hid}/review")
+def review_hypothesis(hid: int, req: HypReview):
+    from . import learning
+    try:
+        return learning.review(hid, req.verdict, req.reviewer, req.reason)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/learning")
+def learning_weights():
+    return {"reviews": db.q("SELECT * FROM hypothesis_reviews ORDER BY at DESC LIMIT 200"),
+            "weights": db.q("SELECT * FROM learned_weights ORDER BY kind, weight")}
+
+
+@app.get("/api/alerts")
+def alerts_list():
+    return db.q("SELECT a.*, h.title FROM alerts_sent a LEFT JOIN hypotheses h ON h.id=a.hypothesis_id ORDER BY at DESC LIMIT 200")

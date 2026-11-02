@@ -9,6 +9,8 @@ import time
 from .sources import capabilities as C
 from .sources import institutional as I
 from .sources import needs as N
+from .sources import procurement as P
+from .sources import seeds as SD
 from .sources import social as S
 
 CHECKS = [
@@ -31,6 +33,11 @@ CHECKS = [
     ("World Bank procurement", lambda: I.worldbank_procurement("Kenya", 5)),
     ("openFDA shortages", lambda: I.fda_shortages(20)),
     ("CFPB complaints", lambda: I.cfpb_complaints(5)),
+    ("TED no-winner lots (EU)", lambda: P.ted_no_winner(14, 1)),
+    ("PNCP failed procurements (BR)", lambda: P.pncp_failed(10, 2)),
+    ("UK Find a Tender cancellations", lambda: P.uk_cancelled(30, 100)),
+    ("Wikidata local channel seeds (ETH)", lambda: [x for v in SD.wikidata_channels("ETH").values() for x in v]),
+    ("YouTube channel RSS", lambda: SD.youtube_channel_feed("UCekQr9znsk2vWxBo3YiLq2w")),
     ("Hacker News", lambda: N.hackernews("shortage", 5, days=30)),
     ("Stack Exchange", lambda: N.stackexchange("can't find", "diy", 5)),
     ("Google Patents", lambda: C.google_patents("solar dryer", 5)),

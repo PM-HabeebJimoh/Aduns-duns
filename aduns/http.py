@@ -38,6 +38,7 @@ HOST_INTERVAL = {
     "api.crossref.org": 1.2,
 }
 DEFAULT_INTERVAL = 0.5
+CACHE_MAX_BYTES = 300_000   # big HTML pages are not cached raw — their parsed result is (see `cached`)
 
 _host_locks: dict[str, threading.Lock] = {}
 _host_last: dict[str, float] = {}
@@ -125,7 +126,7 @@ def fetch(
                         time.sleep(6 * (attempt + 1))
                         continue
                     break
-                if ttl > 0:
+                if ttl > 0 and len(body) <= CACHE_MAX_BYTES:
                     with db.tx() as conn:
                         conn.execute(
                             "INSERT OR REPLACE INTO http_cache (key,url,status,body,fetched_at) VALUES (?,?,?,?,?)",
@@ -150,3 +151,28 @@ def fetch(
 
 def content_hash(*parts: Any) -> str:
     return hashlib.sha256("||".join(str(p or "") for p in parts).encode()).hexdigest()
+
+
+def cached(key: str, ttl: int, fn):
+    """Cache a function's (JSON-serialisable) parsed result instead of the raw page."""
+    k = "parsed:" + hashlib.sha256(key.encode()).hexdigest()
+    row = db.q1("SELECT body, fetched_at FROM http_cache WHERE key=?", (k,))
+    if row and time.time() - row["fetched_at"] < ttl:
+        return json.loads(row["body"])
+    val = fn()
+    with db.tx() as conn:
+        conn.execute("INSERT OR REPLACE INTO http_cache (key,url,status,body,fetched_at) VALUES (?,?,?,?,?)",
+                     (k, key[:500], 200, json.dumps(val, default=str), time.time()))
+    return val
+
+
+def prune_cache(max_age_s: int = 2 * 86400, vacuum: bool = False) -> int:
+    """Delete stale cache rows (long-TTL reference data like gazetteers/seeds are kept)."""
+    with db.tx() as conn:
+        n = conn.execute("""DELETE FROM http_cache WHERE fetched_at < ? AND url NOT LIKE 'https://query.wikidata.org%'
+                            AND url NOT LIKE 'https://api.worldbank.org/v2/country?%'""",
+                         (time.time() - max_age_s,)).rowcount
+        conn.execute("DELETE FROM http_cache WHERE length(body) > ?", (CACHE_MAX_BYTES,))
+    if vacuum:
+        db.connect().execute("VACUUM")
+    return n

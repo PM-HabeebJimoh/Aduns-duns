@@ -102,7 +102,11 @@ def _yt_age_to_date(s: str | None) -> str | None:
 
 
 def youtube_search(query: str, gl: str = "US", hl: str = "en", limit: int = 20) -> list[dict]:
-    """Crawl YouTube search results uploaded this month (no API key)."""
+    """Crawl YouTube search results uploaded this month (no API key). Parsed results are cached, not the page."""
+    return http.cached(f"yt:{query}:{gl}:{hl}:{limit}", 3 * 3600, lambda: _youtube_search(query, gl, hl, limit))
+
+
+def _youtube_search(query: str, gl: str, hl: str, limit: int) -> list[dict]:
     body = http.fetch("https://www.youtube.com/results",
                       {"search_query": query, "sp": "EgIIBA==", "gl": gl.upper(), "hl": hl},
                       source="youtube", ttl=3 * 3600, expect="text",
@@ -347,6 +351,10 @@ _PLAY_REVIEW = re.compile(
 
 
 def play_search(term: str, iso2: str, lang: str = "en", limit: int = 5) -> list[str]:
+    return http.cached(f"playsearch:{term}:{iso2}:{lang}:{limit}", 24 * 3600, lambda: _play_search(term, iso2, lang, limit))
+
+
+def _play_search(term: str, iso2: str, lang: str, limit: int) -> list[str]:
     body = http.fetch("https://play.google.com/store/search", {"q": term, "c": "apps", "hl": lang, "gl": iso2.upper()},
                       source="googleplay", ttl=24 * 3600, expect="text", headers={"User-Agent": BROWSER_UA})
     ids = []
@@ -358,6 +366,16 @@ def play_search(term: str, iso2: str, lang: str = "en", limit: int = 5) -> list[
 
 def play_reviews(app_id: str, iso2: str, lang: str = "en") -> list[dict]:
     """Featured recent user reviews on an app's Play Store page (low ratings = unmet service needs)."""
+    return http.cached(f"playrev:{app_id}:{iso2}:{lang}", 12 * 3600, lambda: _play_reviews(app_id, iso2, lang))
+
+
+def play_app_page(app_id: str, iso2: str, lang: str = "en") -> str:
+    """Raw app page (not cached raw; callers cache what they parse)."""
+    return http.fetch("https://play.google.com/store/apps/details", {"id": app_id, "hl": lang, "gl": iso2.upper()},
+                      source="googleplay", ttl=0, expect="text", headers={"User-Agent": BROWSER_UA})
+
+
+def _play_reviews(app_id: str, iso2: str, lang: str) -> list[dict]:
     body = http.fetch("https://play.google.com/store/apps/details", {"id": app_id, "hl": lang, "gl": iso2.upper()},
                       source="googleplay", ttl=12 * 3600, expect="text", headers={"User-Agent": BROWSER_UA})
     name_m = re.search(r'<h1[^>]*><span[^>]*>([^<]+)</span>', body)

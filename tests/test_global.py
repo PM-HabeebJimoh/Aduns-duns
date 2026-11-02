@@ -68,3 +68,35 @@ def test_fusion_merges_across_languages_via_translation():
     hs = db.q("SELECT * FROM hypotheses WHERE id IN (%s)" % ",".join(map(str, r["hypothesis_ids"])))
     big = max(hs, key=lambda h: h["signal_count"])
     assert big["signal_count"] == 3 and big["scope"] == "global"
+
+
+def test_review_learning_and_rejected_stays_rejected():
+    import json
+    import time as _t
+    from aduns import db, learning
+    now = _t.time()
+    hid = db.insert("hypotheses", {"fingerprint": f"rv{now}", "title": "t", "need_statement": "t", "status": "open",
+                                   "signal_count": 1, "source_count": 1, "layer_count": 1, "score": 0.5,
+                                   "evidence_level": "claim", "created_at": now})
+    sid = db.insert("signals", {"source": "youtube", "layer": "scattered", "text": "x shortage", "retrieved_at": now,
+                                "content_hash": f"rv-{now}", "need_types": json.dumps(["scarcity"]), "lang": "es",
+                                "countries": "[]", "entities": "[]"})
+    db.execute("INSERT INTO hypothesis_signals (hypothesis_id, signal_id, similarity) VALUES (?,?,1)", (hid, sid))
+    out = learning.review(hid, "noise", "tester", "not a need")
+    assert out["status"] == "rejected"
+    w = {(r["kind"], r["key"]): r["weight"] for r in db.q("SELECT * FROM learned_weights")}
+    assert w[("source", "youtube")] < 0.5
+    assert learning.reliability([{"source": "youtube", "lang": "es"}]) < 0.5
+
+
+def test_lease_countries_are_exclusive_and_cover_all_continents():
+    from aduns import geo
+    from aduns.scheduler import lease_countries, release
+    a = lease_countries("worker-A")
+    b = lease_countries("worker-B")
+    assert not set(a) & set(b)
+    assert len({geo.country(x)["continent"] for x in a}) == 6
+    for x in a:
+        release("worker-A", x)
+    for x in b:
+        release("worker-B", x)

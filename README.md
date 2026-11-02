@@ -29,7 +29,8 @@ older than `ADUNS_MAX_AGE_DAYS` (default 90) is rejected.
 | **Invisible** (latent / normalized) | Google Trends daily rising searches · Google autocomplete in the local language and storefront ("where to buy…", "why is … so expensive", "shortage of…") | |
 | **Scattered** (social) | Bluesky (language-filtered) · YouTube search crawl (uploaded this month) · Reddit country communities · Telegram public channels (auto-discovered) · Mastodon · Lemmy · Google Play reviews of essential-service apps (banking, power, water, health, transport…) | Hacker News · Stack Exchange · CFPB complaints |
 | **Visible** (press) | Google News country edition in the local language (last 30 days) · GDELT local press (translingual) | |
-| **Structural** (measured / institutional) | WFP measured market-price spikes (~90 countries) · World Bank procurement notices · failed and cancelled tenders (Prozorro UA, SECOP CO, SAM.gov US) | GDACS disaster alerts · openFDA drug shortages |
+| **Structural** (measured / institutional) | WFP measured market-price spikes (~90 countries) · World Bank procurement notices · public tenders that failed: TED lots closed with no winner (all EU/EEA countries), Brazil PNCP revoked or suspended procurements, UK Find a Tender cancellations, Prozorro UA, SECOP CO, SAM.gov US | GDACS disaster alerts · openFDA drug shortages |
+| **Local media** (seeded per country) | Wikidata lists each country's own media, agencies and municipalities with their Telegram usernames, YouTube channels and subreddits. These are seeded automatically and crawled (YouTube via official channel RSS). | |
 
 **Snowball discovery:** every Telegram channel (`t.me/…`) and subreddit (`r/…`) mentioned in collected text is
 added to `source_registry` and crawled on later sweeps. The source map grows by itself.
@@ -51,11 +52,29 @@ Bluesky, Telegram, and field scouts who can report what they see.
 | **Cross-Border Analogy** | Samples peer countries from every continent. In each one, in its language and over the last 90 days, it measures solution activity (local news of launches and solutions, local apps) against need pressure (local shortage and price news plus sensed signals). Countries with high solutions and low pressure are returned with their headlines and apps as evidence. |
 | **Offline Scout Coordinator** | Drafts missions with real OSM venues, local languages, an interview guide and consent script translated into the local language, and a compensation amount. Takes reports through the web form, API, SMS/WhatsApp (Twilio) and Telegram bot. Runs consent checks, auto-corroboration and human validation, and records payments in a ledger. |
 
+## Scale, learning and alerts
+
+* **Distributed workers (free horizontal scale).** Run `ADUNS_WORKER_TOKEN=… python -m aduns serve --daemon` on a
+  central machine. Then run `python -m aduns worker --server https://central:8000 --token …` on as many other
+  machines as you like (free VMs, laptops, a Raspberry Pi). Countries are leased exclusively, one per continent at a
+  time, so coverage stays equal and nothing is swept twice. Each worker uses its own IP and rate-limit budget, so N
+  workers make a full world rotation roughly N× faster and get past per-IP blocks. Use `daemon --no-sense` to make
+  the central machine only fuse and run the downstream agents.
+* **Review loop.** In the Hypotheses tab, or via `POST /api/hypotheses/{id}/review`, a reviewer marks a hypothesis
+  as confirmed, rejected, duplicate or noise. The engine learns how reliable each source, language and need type is
+  (Beta-smoothed) and scales every hypothesis score by its evidence's learned reliability. Rejected needs stay
+  rejected even when the same evidence re-clusters.
+* **Emerging needs.** Momentum compares evidence from the last 7 days with the 7 days before. A need is flagged
+  `emerging` when momentum is 2× or more with at least 3 recent signals (dashboard filter: "Emerging only").
+* **Alerts.** Strong or emerging needs are sent once each to `ADUNS_ALERT_WEBHOOK` (Slack, Discord or any JSON
+  endpoint) and/or a Telegram chat (`ADUNS_TELEGRAM_TOKEN` + `ADUNS_ALERT_CHAT_ID`).
+
 ## Run
 
 ```bash
 pip install -r requirements.txt
-python -m aduns selftest                  # live check of all 31 data sources
+python -m aduns selftest                  # live check of all 36 data sources
+python -m aduns worker --server URL       # extra sweep worker on another machine/IP
 python -m aduns serve --daemon            # dashboard + API at :8000 and the 24/7 worldwide loop
 python -m aduns daemon                    # the loop alone (Ctrl-C or touch data/STOP to stop)
 python -m aduns sweep --country Kenya     # one country, its own languages
@@ -72,7 +91,9 @@ and Runs & audit.
 |---|---|
 | `ADUNS_MAX_AGE_DAYS` | Recency window (default 90) |
 | `ADUNS_CONTACT_EMAIL` | Polite-pool identification; raises the MyMemory fallback translation quota |
-| `ADUNS_TELEGRAM_TOKEN` | Enables Telegram bot replies for scouts (`/webhooks/telegram`) |
+| `ADUNS_TELEGRAM_TOKEN` | Enables Telegram bot replies for scouts (`/webhooks/telegram`) and Telegram alerts |
+| `ADUNS_WORKER_TOKEN` | Shared secret that enables remote workers (`/api/worker/*`) |
+| `ADUNS_ALERT_WEBHOOK`, `ADUNS_ALERT_CHAT_ID` | Where alerts for strong or emerging needs are sent |
 | `GITHUB_TOKEN`, `STACKEXCHANGE_KEY` | Higher rate limits (optional) |
 | `ANTHROPIC_API_KEY` | Optional Claude synthesis of hypotheses from their evidence |
 
